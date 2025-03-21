@@ -18,22 +18,20 @@ import {
 import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
-import * as cocossd from "@tensorflow-models/coco-ssd"
-import "@tensorflow/tfjs"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 
-const SIDES = ["Frontal", "Lateral Izquierdo", "Trasero", "Lateral Derecho"]
+const SIDES: Array<keyof typeof SIDE_ICONS> = ["Frontal", "Lateral Izquierdo", "Trasero", "Lateral Derecho"]
 
-const SIDE_ICONS: Record<typeof SIDES[number], string> = {
+const SIDE_ICONS = {
   Frontal: "↑",
   "Lateral Izquierdo": "←",
   Trasero: "↓",
   "Lateral Derecho": "→",
 }
 
-const SIDE_COLORS: Record<typeof SIDES[number], string> = {
+const SIDE_COLORS: Record<string, string> = {
   Frontal: "from-green-400 to-emerald-500",
   "Lateral Izquierdo": "from-emerald-400 to-green-500",
   Trasero: "from-teal-400 to-emerald-500",
@@ -62,18 +60,14 @@ export default function Captura() {
   const [showPreview, setShowPreview] = useState(false)
   const [showGuides, setShowGuides] = useState(true)
   const [sessionId, setSessionId] = useState("")
-  const [model, setModel] = useState<cocossd.ObjectDetection | null>(null)
   const [vehicleDetected, setVehicleDetected] = useState(false)
-  const [isModelLoading, setIsModelLoading] = useState(true)
-  const detectionRef = useRef<number | null>(null)
   const [vehicleNumber, setVehicleNumber] = useState("")
   const [showVehicleForm, setShowVehicleForm] = useState(true)
   const [vehicleNumberError, setVehicleNumberError] = useState("")
-  const [isLoaded, setIsLoaded] = useState(false)
+  // const [isLoaded, setIsLoaded] = useState(false)
+  const [simulationInterval, setSimulationInterval] = useState<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
-    setIsLoaded(true)
-
     // Add animation classes after component mounts
     setTimeout(() => {
       const animElements = document.querySelectorAll(".anim-item")
@@ -91,39 +85,18 @@ export default function Captura() {
     const newSessionId = `session_${Date.now()}`
     setSessionId(newSessionId)
 
-    // Don't load model or start camera until vehicle number is entered
+    // Don't start camera until vehicle number is entered
     if (!showVehicleForm) {
-      loadModelAndStartCamera()
+      startCamera()
     }
 
     return () => {
       stopCamera()
-      if (detectionRef.current) {
-        cancelAnimationFrame(detectionRef.current)
+      if (simulationInterval) {
+        clearInterval(simulationInterval)
       }
     }
   }, [showVehicleForm])
-
-  const loadModelAndStartCamera = async () => {
-    // Load COCO-SSD model
-    try {
-      setIsModelLoading(true)
-      const loadedModel = await cocossd.load()
-      setModel(loadedModel)
-      setIsModelLoading(false)
-      toast.success("Detector de buses activado", {
-        description: "Optimizado para buses de Medellín (Runners, Agrale, NPR)",
-      })
-    } catch (error) {
-      console.error("Error loading detection model:", error)
-      toast.error("Error al cargar el detector de vehículos", {
-        description: "La detección automática no estará disponible",
-      })
-      setIsModelLoading(false)
-    }
-
-    startCamera()
-  }
 
   const startCamera = async () => {
     try {
@@ -140,8 +113,8 @@ export default function Captura() {
         videoRef.current.srcObject = stream
         videoRef.current.onloadedmetadata = () => {
           setIsLoading(false)
-          // Start detection once video is loaded
-          startVehicleDetection()
+          // Start detection simulation once video is loaded
+          startDetectionSimulation()
         }
       }
     } catch (err) {
@@ -158,105 +131,67 @@ export default function Captura() {
       stream.getTracks().forEach((track) => track.stop())
       setStream(null)
     }
+
+    if (simulationInterval) {
+      clearInterval(simulationInterval)
+      setSimulationInterval(null)
+    }
   }
 
-  const startVehicleDetection = () => {
-    if (!model || !videoRef.current) return
+  const startDetectionSimulation = () => {
+    // Simulate loading the detection model
+    toast.success("Detector de buses activado", {
+      description: "Simulación de detección iniciada",
+    })
 
-    const detectVehicle = async () => {
-      if (!model || !videoRef.current || videoRef.current.paused || videoRef.current.ended) {
-        return
-      }
+    // Draw initial detection box
+    drawSimulatedDetection(true)
+    setVehicleDetected(true)
 
-      try {
-        // Run detection
-        const predictions = await model.detect(videoRef.current)
+    // Set up interval to simulate detection changes
+    const interval = setInterval(() => {
+      // Randomly toggle detection state with 80% chance of being detected
+      const isDetected = Math.random() < 0.8
+      setVehicleDetected(isDetected)
+      drawSimulatedDetection(isDetected)
+    }, 3000)
 
-        // Log all detections for debugging
-        if (predictions.length > 0) {
-          console.log("Detections:", predictions)
-        }
+    setSimulationInterval(interval)
+  }
 
-        // Prioritize bus detection with lower threshold
-        // Bus types in Medellin: Runners, Agrale, NPR are all classified as "bus" in COCO-SSD
-        const busDetection = predictions.find((p) => p.class === "bus" && p.score > 0.4)
+  const drawSimulatedDetection = (isDetected: boolean) => {
+    if (!canvasRef.current || !videoRef.current) return
 
-        // If bus is detected, use it
-        if (busDetection) {
-          setVehicleDetected(true)
+    const ctx = canvasRef.current.getContext("2d")
+    if (!ctx) return
 
-          // Draw detection results if canvas is available
-          if (canvasRef.current) {
-            const ctx = canvasRef.current.getContext("2d")
-            if (ctx) {
-              // Clear canvas
-              ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+    // Clear canvas
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
 
-              // Draw bounding box with thicker line for buses
-              ctx.strokeStyle = "#10b981" // emerald-500
-              ctx.lineWidth = 4
-              ctx.strokeRect(busDetection.bbox[0], busDetection.bbox[1], busDetection.bbox[2], busDetection.bbox[3])
+    if (isDetected) {
+      // Get video dimensions
+      const videoWidth = videoRef.current.videoWidth || 1280
+      const videoHeight = videoRef.current.videoHeight || 720
 
-              // Draw label with bus highlight
-              ctx.fillStyle = "#10b981" // emerald-500
-              ctx.font = "bold 18px Arial"
-              ctx.fillText(
-                `BUS ${Math.round(busDetection.score * 100)}%`,
-                busDetection.bbox[0],
-                busDetection.bbox[1] > 20 ? busDetection.bbox[1] - 5 : busDetection.bbox[1] + 20,
-              )
-            }
-          }
-        } else {
-          // If no bus, check for other vehicles with higher threshold
-          const vehicleClasses = ["car", "truck", "bus"]
-          const vehiclePrediction = predictions.find((p) => vehicleClasses.includes(p.class) && p.score > 0.5)
+      // Calculate a random position for the detection box
+      // that stays within the center area of the video
+      const centerX = videoWidth / 2
+      const centerY = videoHeight / 2
+      const boxWidth = videoWidth * 0.5 + (Math.random() * 0.2 - 0.1) * videoWidth
+      const boxHeight = videoHeight * 0.6 + (Math.random() * 0.2 - 0.1) * videoHeight
+      const x = centerX - boxWidth / 2 + (Math.random() * 0.2 - 0.1) * videoWidth
+      const y = centerY - boxHeight / 2 + (Math.random() * 0.2 - 0.1) * videoHeight
 
-          setVehicleDetected(!!vehiclePrediction)
+      // Draw bounding box
+      ctx.strokeStyle = "#10b981" // emerald-500
+      ctx.lineWidth = 4
+      ctx.strokeRect(x, y, boxWidth, boxHeight)
 
-          // Draw detection results if canvas is available
-          if (canvasRef.current && vehiclePrediction) {
-            const ctx = canvasRef.current.getContext("2d")
-            if (ctx) {
-              // Clear canvas
-              ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-
-              // Draw bounding box
-              ctx.strokeStyle = "#10b981" // emerald-500
-              ctx.lineWidth = 3
-              ctx.strokeRect(
-                vehiclePrediction.bbox[0],
-                vehiclePrediction.bbox[1],
-                vehiclePrediction.bbox[2],
-                vehiclePrediction.bbox[3],
-              )
-
-              // Draw label
-              ctx.fillStyle = "#10b981" // emerald-500
-              ctx.font = "16px Arial"
-              ctx.fillText(
-                `${vehiclePrediction.class} ${Math.round(vehiclePrediction.score * 100)}%`,
-                vehiclePrediction.bbox[0],
-                vehiclePrediction.bbox[1] > 20 ? vehiclePrediction.bbox[1] - 5 : vehiclePrediction.bbox[1] + 20,
-              )
-            }
-          } else if (canvasRef.current) {
-            // Clear canvas if no vehicle detected
-            const ctx = canvasRef.current.getContext("2d")
-            if (ctx) {
-              ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Detection error:", error)
-      }
-
-      // Continue detection loop
-      detectionRef.current = requestAnimationFrame(detectVehicle)
+      // Draw label
+      ctx.fillStyle = "#10b981" // emerald-500
+      ctx.font = "bold 18px Arial"
+      ctx.fillText(`BUS ${Math.round(70 + Math.random() * 25)}%`, x, y > 20 ? y - 5 : y + 20)
     }
-
-    detectVehicle()
   }
 
   const savePhotoToLocalStorage = (photoDataUrl: string) => {
@@ -314,6 +249,12 @@ export default function Captura() {
       if (ctx) {
         // Draw the video frame
         ctx.drawImage(videoRef.current, 0, 0)
+
+        // Get the detection overlay canvas
+        if (canvasRef.current) {
+          // Draw the detection overlay on top of the video frame
+          ctx.drawImage(canvasRef.current, 0, 0)
+        }
 
         // Get photo data URL
         const photo = canvas.toDataURL("image/jpeg", 0.8)
@@ -456,6 +397,18 @@ export default function Captura() {
             animate={{ opacity: 1, y: 0 }}
             className="max-w-md mx-auto anim-item anim-slide-up"
           >
+            <div className="text-center mb-8 anim-item anim-slide-up">
+              <div className="relative mb-6 mx-auto">
+                <div className="absolute inset-0 bg-gradient-to-b from-green-200/50 to-emerald-300/50 rounded-full blur-xl transform scale-110 animate-pulse-slow"></div>
+                <div className="relative bg-gradient-to-br from-green-100 to-emerald-200 w-24 h-24 rounded-full flex items-center justify-center mx-auto shadow-lg transform transition-transform duration-500 hover:scale-105 hover:rotate-3 group">
+                  <Truck className="w-12 h-12 text-green-600 transition-transform duration-300 group-hover:scale-110" />
+                </div>
+              </div>
+              <h1 className="text-3xl font-bold text-gray-900 mb-3">Información del Vehículo</h1>
+              <p className="text-gray-600 max-w-sm mx-auto">
+                Ingresa el número del vehículo para comenzar la captura de fotos
+              </p>
+            </div>
 
             <Card className="border-green-100 shadow-lg overflow-hidden anim-item anim-slide-up">
               <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100 pb-4">
@@ -507,6 +460,41 @@ export default function Captura() {
                 </div>
               </CardFooter>
             </Card>
+
+            {/* Decorative cards */}
+            <div className="mt-12 grid grid-cols-2 gap-4 anim-item anim-slide-up">
+              {[1, 2, 3, 4].map((index) => (
+                <div
+                  key={index}
+                  className="bg-white/70 backdrop-blur-sm rounded-xl shadow-sm border border-green-100/50 h-24 relative overflow-hidden group transform transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
+                  style={{ animationDelay: `${index * 100}ms` }}
+                >
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-green-300 to-emerald-500 transform scale-x-0 origin-left transition-transform duration-300 group-hover:scale-x-100"></div>
+                  <div className="absolute -bottom-1 -right-1 w-16 h-16 bg-gradient-to-tl from-green-100 to-transparent rounded-full opacity-60"></div>
+                  <div className="p-4 flex flex-col h-full justify-between">
+                    <div className="flex justify-between items-start">
+                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                        <Camera className="w-4 h-4 text-green-600" />
+                      </div>
+                      <div className="bg-green-50 rounded-full w-5 h-5 flex items-center justify-center">
+                        <span className="text-xs font-semibold text-green-700">{index}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">
+                        {index === 1
+                          ? "Vista frontal"
+                          : index === 2
+                            ? "Lateral izquierdo"
+                            : index === 3
+                              ? "Trasero"
+                              : "Lateral derecho"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </motion.div>
         ) : (
           <>
@@ -535,13 +523,11 @@ export default function Captura() {
 
             <div className="relative aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-xl border border-green-800/20 anim-item anim-slide-up">
               {/* Loading state */}
-              {(isLoading || isModelLoading) && (
+              {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-green-900 to-emerald-900 z-20">
                   <div className="flex flex-col items-center">
                     <RefreshCw className="w-12 h-12 text-green-400 animate-spin mb-4" />
-                    <p className="text-green-200 text-sm font-medium">
-                      {isLoading ? "Iniciando cámara..." : "Cargando detector de vehículos..."}
-                    </p>
+                    <p className="text-green-200 text-sm font-medium">Iniciando cámara...</p>
                     <div className="mt-4 w-48 h-1.5 bg-green-800/50 rounded-full overflow-hidden">
                       <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 animate-pulse-slow rounded-full"></div>
                     </div>
@@ -561,7 +547,7 @@ export default function Captura() {
               />
 
               {/* Vehicle detection status indicator */}
-              {!isLoading && !isModelLoading && !showPreview && (
+              {!isLoading && !showPreview && (
                 <div
                   className={`absolute top-4 right-4 flex items-center gap-2 px-3 py-2 rounded-full z-10 transition-all duration-300 ${
                     vehicleDetected
@@ -579,7 +565,7 @@ export default function Captura() {
               )}
 
               {/* Add a bus detection indicator to the UI */}
-              {!isLoading && !isModelLoading && !showPreview && vehicleDetected && (
+              {!isLoading && !showPreview && vehicleDetected && (
                 <div className="absolute bottom-4 left-4 z-10 bg-gradient-to-r from-green-600/90 to-emerald-700/90 text-white px-3 py-2 rounded-lg shadow-lg backdrop-blur-sm">
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
@@ -673,7 +659,7 @@ export default function Captura() {
                   onClick={retakePhoto}
                   variant="outline"
                   className="rounded-full w-12 h-12 p-0 border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-300 shadow-sm"
-                  disabled={currentSide === 0 || isLoading || showPreview || isModelLoading}
+                  disabled={currentSide === 0 || isLoading || showPreview}
                 >
                   <RotateCw className="h-5 w-5 text-green-700" />
                 </Button>
@@ -685,7 +671,7 @@ export default function Captura() {
                       ? "from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
                       : "from-red-500 to-red-600 hover:from-red-600 hover:to-red-700"
                   } text-white rounded-full w-20 h-20 p-0 shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 relative overflow-hidden group`}
-                  disabled={isLoading || showPreview || isModelLoading}
+                  disabled={isLoading || showPreview}
                 >
                   <span className="relative z-10">
                     <Camera className="h-8 w-8" />
@@ -701,14 +687,14 @@ export default function Captura() {
                   onClick={() => setShowGuides(!showGuides)}
                   variant="outline"
                   className="rounded-full w-12 h-12 p-0 border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-300 shadow-sm"
-                  disabled={isLoading || showPreview || isModelLoading}
+                  disabled={isLoading || showPreview}
                 >
                   <Maximize className="h-5 w-5 text-green-700" />
                 </Button>
               </div>
 
               {/* Vehicle detection message */}
-              {!vehicleDetected && !isLoading && !isModelLoading && !showPreview && (
+              {!vehicleDetected && !isLoading && !showPreview && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-w-xs mx-auto shadow-sm">
                   <div className="flex items-start gap-2">
                     <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
