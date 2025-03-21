@@ -21,7 +21,7 @@ import {
   ZoomOut,
   Expand,
   Minimize,
-  RotateCcw,
+  Smartphone,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "framer-motion"
@@ -32,15 +32,16 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
+import { useMobile } from "../../hooks/use-mobile"
 
 const SIDES = ["Frontal", "Lateral Izquierdo", "Trasero", "Lateral Derecho"]
 
-const SIDE_ICONS: Record<string, string> = {
+const SIDE_ICONS = {
   Frontal: "↑",
   "Lateral Izquierdo": "←",
   Trasero: "↓",
   "Lateral Derecho": "→",
-} as const
+}
 
 const SIDE_COLORS: Record<string, string> = {
   Frontal: "from-green-400 to-emerald-500",
@@ -67,6 +68,7 @@ export default function Captura() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const retakeIndex = searchParams.get("retake")
+  const isMobile = useMobile()
 
   const [currentSide, setCurrentSide] = useState(0)
   const [photos, setPhotos] = useState<string[]>([])
@@ -93,8 +95,48 @@ export default function Captura() {
   const [initialTouchDistance, setInitialTouchDistance] = useState<number | null>(null)
   const [initialZoomLevel, setInitialZoomLevel] = useState<number>(1)
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait")
+  const [deviceOrientation, setDeviceOrientation] = useState<"portrait" | "landscape">("portrait")
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [cameraError, setCameraError] = useState<string | null>(null)
+  const [showOrientationGuide, setShowOrientationGuide] = useState(false)
+  const [sideChanging, setSideChanging] = useState(false)
+  const [showTutorial, setShowTutorial] = useState(false)
+  const [tutorialStep, setTutorialStep] = useState(0)
+
+  // Detectar la orientación del dispositivo
+  useEffect(() => {
+    if (!isMobile) return
+
+    const handleOrientationChange = () => {
+      const isLandscape = window.innerWidth > window.innerHeight
+      setDeviceOrientation(isLandscape ? "landscape" : "portrait")
+    }
+
+    // Configuración inicial
+    handleOrientationChange()
+
+    // Escuchar cambios de orientación
+    window.addEventListener("resize", handleOrientationChange)
+    window.addEventListener("orientationchange", handleOrientationChange)
+
+    return () => {
+      window.removeEventListener("resize", handleOrientationChange)
+      window.removeEventListener("orientationchange", handleOrientationChange)
+    }
+  }, [isMobile])
+
+  // Verificar si la orientación del dispositivo coincide con la orientación requerida
+  useEffect(() => {
+    if (!isMobile || showVehicleForm || isLoading) return
+
+    const requiredOrientation = LANDSCAPE_SIDES.includes(SIDES[currentSide]) ? "landscape" : "portrait"
+
+    if (deviceOrientation !== requiredOrientation) {
+      setShowOrientationGuide(true)
+    } else {
+      setShowOrientationGuide(false)
+    }
+  }, [deviceOrientation, currentSide, isMobile, showVehicleForm, isLoading])
 
   useEffect(() => {
     setIsLoaded(true)
@@ -492,9 +534,18 @@ export default function Captura() {
       }
 
       if (currentSide < SIDES.length - 1) {
-        setCurrentSide(currentSide + 1)
-        setUploadedImage(null) // Limpiar imagen cargada al pasar al siguiente lado
-        // No resetear el nivel de zoom para mantener la misma visualización
+        // Iniciar animación de cambio de lado
+        setSideChanging(true)
+
+        setTimeout(() => {
+          setCurrentSide(currentSide + 1)
+          setUploadedImage(null) // Limpiar imagen cargada al pasar al siguiente lado
+
+          // Terminar animación después de cambiar el lado
+          setTimeout(() => {
+            setSideChanging(false)
+          }, 500)
+        }, 500)
       } else {
         stopCamera()
         toast.success("¡Todas las fotos del bus capturadas!", {
@@ -509,30 +560,41 @@ export default function Captura() {
 
   const retakePhoto = () => {
     if (currentSide > 0) {
-      setCurrentSide(currentSide - 1)
-      // Remove the photo from state
-      const newPhotos = [...photos]
-      newPhotos[currentSide - 1] = ""
-      setPhotos(newPhotos)
+      // Iniciar animación de cambio de lado
+      setSideChanging(true)
 
-      // Also remove from localStorage
-      try {
-        const existingSessions = localStorage.getItem("photoSessions")
-        if (existingSessions) {
-          const sessions: PhotoSession[] = JSON.parse(existingSessions)
-          const currentSession = sessions.find((s) => s.id === sessionId)
-          if (currentSession) {
-            const sideToRemove = SIDES[currentSide - 1]
-            const photoIndex = currentSession.photos.findIndex((p) => p.side === sideToRemove)
-            if (photoIndex >= 0) {
-              currentSession.photos.splice(photoIndex, 1)
-              localStorage.setItem("photoSessions", JSON.stringify(sessions))
+      setTimeout(() => {
+        setCurrentSide(currentSide - 1)
+
+        // Remove the photo from state
+        const newPhotos = [...photos]
+        newPhotos[currentSide - 1] = ""
+        setPhotos(newPhotos)
+
+        // Also remove from localStorage
+        try {
+          const existingSessions = localStorage.getItem("photoSessions")
+          if (existingSessions) {
+            const sessions: PhotoSession[] = JSON.parse(existingSessions)
+            const currentSession = sessions.find((s) => s.id === sessionId)
+            if (currentSession) {
+              const sideToRemove = SIDES[currentSide - 1]
+              const photoIndex = currentSession.photos.findIndex((p) => p.side === sideToRemove)
+              if (photoIndex >= 0) {
+                currentSession.photos.splice(photoIndex, 1)
+                localStorage.setItem("photoSessions", JSON.stringify(sessions))
+              }
             }
           }
+        } catch (error) {
+          console.error("Error removing photo from localStorage:", error)
         }
-      } catch (error) {
-        console.error("Error removing photo from localStorage:", error)
-      }
+
+        // Terminar animación después de cambiar el lado
+        setTimeout(() => {
+          setSideChanging(false)
+        }, 500)
+      }, 500)
     }
   }
 
@@ -552,10 +614,13 @@ export default function Captura() {
     toast.success(`Vehículo #${vehicleNumber} registrado`, {
       description: "Iniciando cámara para captura de fotos",
     })
+
+    // Mostrar tutorial para nuevos usuarios
+    setShowTutorial(true)
   }
 
   const handleScreenTap = () => {
-    if (!isLoading && !showPreview && activeTab === "camera") {
+    if (!isLoading && !showPreview && activeTab === "camera" && !showOrientationGuide && !showTutorial) {
       takePhoto()
     }
   }
@@ -655,6 +720,16 @@ export default function Captura() {
     startCamera()
   }
 
+  // Avanzar en el tutorial
+  const nextTutorialStep = () => {
+    if (tutorialStep < 3) {
+      setTutorialStep(tutorialStep + 1)
+    } else {
+      setShowTutorial(false)
+      setTutorialStep(0)
+    }
+  }
+
   // Añade este useEffect después de los otros efectos
   useEffect(() => {
     if (isFullscreen && stream && videoRef.current) {
@@ -677,6 +752,121 @@ export default function Captura() {
     }
   }, [isFullscreen, stream])
 
+  // Renderizar la guía de orientación
+  const renderOrientationGuide = () => {
+    const requiredOrientation = LANDSCAPE_SIDES.includes(SIDES[currentSide]) ? "landscape" : "portrait"
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center"
+      >
+        <div className="bg-white rounded-xl p-6 max-w-sm mx-4 text-center">
+          <div className="mb-6">
+            <div className="w-20 h-20 mx-auto bg-emerald-100 rounded-full flex items-center justify-center mb-4">
+              <Smartphone className="h-10 w-10 text-emerald-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">Gira tu dispositivo</h3>
+            <p className="text-gray-600">
+              Para capturar correctamente el lado {SIDES[currentSide]}, por favor gira tu dispositivo a modo{" "}
+              {requiredOrientation === "landscape" ? "horizontal" : "vertical"}.
+            </p>
+          </div>
+
+          <div className="relative w-32 h-32 mx-auto mb-6">
+            <motion.div
+              animate={{
+                rotate: requiredOrientation === "landscape" ? 90 : 0,
+                scale: [1, 1.05, 1],
+              }}
+              transition={{
+                rotate: { duration: 1, repeat: Number.POSITIVE_INFINITY, repeatType: "reverse" },
+                scale: { duration: 1, repeat: Number.POSITIVE_INFINITY, repeatType: "reverse" },
+              }}
+              className="w-full h-full bg-emerald-50 border-2 border-emerald-200 rounded-xl flex items-center justify-center"
+            >
+              <Smartphone className="h-16 w-16 text-emerald-500" />
+            </motion.div>
+          </div>
+
+          <Button
+            onClick={() => setShowOrientationGuide(false)}
+            className="w-full bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white"
+          >
+            Continuar de todos modos
+          </Button>
+        </div>
+      </motion.div>
+    )
+  }
+
+  // Renderizar el tutorial
+  const renderTutorial = () => {
+    const tutorialContent = [
+      {
+        title: "Bienvenido a la captura de fotos",
+        description: "Aprenderás a capturar fotos de alta calidad de tu vehículo desde diferentes ángulos.",
+        icon: <Camera className="h-10 w-10 text-emerald-600" />,
+      },
+      {
+        title: "Orientación correcta",
+        description:
+          "Gira tu dispositivo según se indique para cada lado del vehículo. Algunos lados requieren orientación horizontal.",
+        icon: <Smartphone className="h-10 w-10 text-emerald-600" />,
+      },
+      {
+        title: "Detección automática",
+        description:
+          "La aplicación detectará automáticamente el vehículo. Asegúrate de que esté completamente visible en el encuadre.",
+        icon: <Truck className="h-10 w-10 text-emerald-600" />,
+      },
+      {
+        title: "¡Listo para comenzar!",
+        description: "Toca la pantalla para capturar la foto cuando el vehículo esté correctamente encuadrado.",
+        icon: <CheckCircle className="h-10 w-10 text-emerald-600" />,
+      },
+    ]
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center"
+      >
+        <div className="bg-white rounded-xl p-6 max-w-sm mx-4 text-center">
+          <div className="mb-6">
+            <div className="w-20 h-20 mx-auto bg-emerald-100 rounded-full flex items-center justify-center mb-4">
+              {tutorialContent[tutorialStep].icon}
+            </div>
+            <h3 className="text-xl font-bold text-gray-800 mb-2">{tutorialContent[tutorialStep].title}</h3>
+            <p className="text-gray-600">{tutorialContent[tutorialStep].description}</p>
+          </div>
+
+          <div className="flex justify-between items-center">
+            <div className="flex space-x-1">
+              {tutorialContent.map((_, index) => (
+                <div
+                  key={index}
+                  className={`w-2 h-2 rounded-full ${index === tutorialStep ? "bg-emerald-500" : "bg-gray-300"}`}
+                />
+              ))}
+            </div>
+
+            <Button
+              onClick={nextTutorialStep}
+              className="bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white"
+            >
+              {tutorialStep < 3 ? "Siguiente" : "Comenzar"}
+            </Button>
+          </div>
+        </div>
+      </motion.div>
+    )
+  }
+
   return (
     <div className="min-h-screen overflow-hidden bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50">
       {/* Animated background elements */}
@@ -691,6 +881,61 @@ export default function Captura() {
           style={{ animationDelay: "2s" }}
         ></div>
       </div>
+
+      {/* Animación de cambio de lado */}
+      <AnimatePresence>
+        {sideChanging && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1, rotate: [0, 10, 0] }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+              className="bg-gradient-to-br from-green-500 to-emerald-600 p-8 rounded-2xl shadow-xl text-white text-center"
+            >
+              <div className="mb-4">
+                <Truck className="h-16 w-16 mx-auto mb-2" />
+                <h2 className="text-2xl font-bold">Cambiando de lado</h2>
+              </div>
+              <div className="flex items-center justify-center space-x-4">
+                <div className="flex flex-col items-center">
+                  <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2">
+                    <span className="text-xl font-bold">{SIDE_ICONS[SIDES[Math.max(0, currentSide - 1)] as keyof typeof SIDE_ICONS]}</span>
+                  </div>
+                  <span className="text-sm">{SIDES[Math.max(0, currentSide - 1)]}</span>
+                </div>
+
+                <motion.div
+                  animate={{ x: [0, 10, 0] }}
+                  transition={{ repeat: Number.POSITIVE_INFINITY, duration: 0.8 }}
+                >
+                  <ChevronRight className="h-8 w-8" />
+                </motion.div>
+
+                <div className="flex flex-col items-center">
+                  <div className={`w-12 h-12 rounded-full bg-white/20 flex items-center justify-center mb-2`}>
+                    <span className="text-xl font-bold">
+                      {SIDE_ICONS[SIDES[Math.min(SIDES.length - 1, currentSide + 1)] as keyof typeof SIDE_ICONS]}
+                    </span>
+                  </div>
+                  <span className="text-sm">{SIDES[Math.min(SIDES.length - 1, currentSide + 1)]}</span>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Guía de orientación */}
+      <AnimatePresence>{showOrientationGuide && renderOrientationGuide()}</AnimatePresence>
+
+      {/* Tutorial */}
+      <AnimatePresence>{showTutorial && renderTutorial()}</AnimatePresence>
 
       {/* Modo de pantalla completa */}
       {isFullscreen && (
@@ -819,35 +1064,68 @@ export default function Captura() {
                 </div>
               )}
 
-              {/* Side indicator */}
+              {/* Side indicator - Mejorado con animación */}
               {!isLoading && !showPreview && !cameraError && (
-                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full z-10">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-white text-xs font-medium">{SIDES[currentSide]}</span>
+                <motion.div
+                  initial={{ y: -20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10"
+                >
+                  <div className="bg-gradient-to-r from-green-600 to-emerald-700 px-4 py-2 rounded-full shadow-lg">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                        <span className="text-white text-lg font-bold">{SIDE_ICONS[SIDES[currentSide] as keyof typeof SIDE_ICONS]}</span>
+                      </div>
+                      <span className="text-white font-medium">{SIDES[currentSide]}</span>
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               )}
 
-              {/* Orientation indicator */}
+              {/* Orientation indicator - Mejorado con animación */}
               {!isLoading && !showPreview && !cameraError && (
-                <div className="absolute bottom-4 right-4 z-10 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full">
-                  <div className="flex items-center gap-2">
-                    <RotateCcw className="w-3 h-3 text-white" />
-                    <span className="text-white text-xs">
+                <motion.div
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  className="absolute bottom-4 right-4 z-10"
+                >
+                  <div className="bg-black/60 backdrop-blur-sm px-3 py-2 rounded-full flex items-center gap-2">
+                    <motion.div
+                      animate={{ rotate: orientation === "landscape" ? 90 : 0 }}
+                      transition={{ duration: 0.5 }}
+                    >
+                      <Smartphone className="w-4 h-4 text-white" />
+                    </motion.div>
+                    <span className="text-white text-xs font-medium">
                       {orientation === "landscape" ? "Horizontal" : "Vertical"}
                     </span>
                   </div>
-                </div>
+                </motion.div>
               )}
 
-              {/* Tap to capture hint */}
+              {/* Tap to capture hint - Mejorado con animación */}
               {!isLoading && !showPreview && !cameraError && (
-                <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs z-10 opacity-80">
-                  Toca la pantalla para capturar
-                </div>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-10"
+                >
+                  <div className="bg-gradient-to-r from-green-600 to-emerald-700 px-4 py-2 rounded-full shadow-lg">
+                    <div className="flex items-center gap-2">
+                      <motion.div
+                        animate={{ scale: [1, 1.1, 1] }}
+                        transition={{ repeat: Number.POSITIVE_INFINITY, duration: 1.5 }}
+                      >
+                        <Camera className="h-4 w-4 text-white" />
+                      </motion.div>
+                      <span className="text-white text-sm">Toca para capturar</span>
+                    </div>
+                  </div>
+                </motion.div>
               )}
 
-              {/* Photo preview */}
+              {/* Photo preview - Mejorado con animación */}
               <AnimatePresence>
                 {showPreview && (
                   <motion.div
@@ -856,25 +1134,39 @@ export default function Captura() {
                     exit={{ opacity: 0 }}
                     className="absolute inset-0 bg-gradient-to-br from-green-900/90 to-emerald-900/90 backdrop-blur-sm flex items-center justify-center z-20"
                   >
-                    <div className="text-white flex flex-col items-center">
-                      <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-3">
-                        <CheckCircle className="w-8 h-8 text-green-500" />
-                      </div>
-                      <p className="text-xl font-medium">¡Foto capturada!</p>
-                      <p className="text-sm text-green-200 mt-1">Preparando siguiente ángulo...</p>
-                    </div>
+                    <motion.div
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ delay: 0.2, duration: 0.5 }}
+                      className="text-white flex flex-col items-center"
+                    >
+                      <motion.div
+                        animate={{ scale: [1, 1.2, 1] }}
+                        transition={{ duration: 0.8, repeat: 1 }}
+                        className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center mb-4"
+                      >
+                        <CheckCircle className="w-10 h-10 text-green-500" />
+                      </motion.div>
+                      <h3 className="text-2xl font-bold mb-2">¡Foto capturada!</h3>
+                      <p className="text-green-200">Preparando siguiente ángulo...</p>
+                    </motion.div>
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Controles superiores */}
-              <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
+              {/* Controles superiores - Mejorados con animación */}
+              <motion.div
+                initial={{ y: -20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2 }}
+                className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4"
+              >
                 <div className="flex items-center gap-2">
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={toggleFullscreen}
-                    className="bg-black/50 hover:bg-black/70 text-white border-0"
+                    className="bg-black/50 hover:bg-black/70 text-white border-0 rounded-full"
                   >
                     <Minimize className="w-4 h-4 mr-1" />
                     Salir
@@ -883,7 +1175,7 @@ export default function Captura() {
                     variant="secondary"
                     size="sm"
                     onClick={() => setShowGuides(!showGuides)}
-                    className="bg-black/50 hover:bg-black/70 text-white border-0"
+                    className="bg-black/50 hover:bg-black/70 text-white border-0 rounded-full"
                   >
                     {showGuides ? (
                       <span className="flex items-center">
@@ -899,15 +1191,30 @@ export default function Captura() {
                   </Button>
                 </div>
 
-                <div className="flex items-center">
-                  <Badge variant="outline" className="bg-black/40 text-white border-0">
-                    {SIDES[currentSide]}
-                  </Badge>
+                {/* Indicador de progreso */}
+                <div className="hidden sm:flex items-center space-x-1 bg-black/40 rounded-full px-3 py-1">
+                  {SIDES.map((_, index) => (
+                    <div
+                      key={index}
+                      className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                        index === currentSide
+                          ? "bg-green-500 scale-125"
+                          : index < currentSide
+                            ? "bg-green-500 opacity-70"
+                            : "bg-gray-500 opacity-40"
+                      }`}
+                    />
+                  ))}
                 </div>
-              </div>
+              </motion.div>
 
-              {/* Zoom controls */}
-              <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-30 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-4">
+              {/* Zoom controls - Mejorados con animación */}
+              <motion.div
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-30 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-4"
+              >
                 <Button
                   variant="ghost"
                   size="sm"
@@ -938,20 +1245,36 @@ export default function Captura() {
                 >
                   <ZoomIn className="h-5 w-5" />
                 </Button>
-              </div>
+              </motion.div>
 
-              {/* Botón de captura */}
-              <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-30">
-                <Button
-                  onClick={takePhoto}
-                  className={`bg-gradient-to-r ${
-                    vehicleDetected ? "from-green-500 to-emerald-600" : "from-red-500 to-red-600"
-                  } text-white rounded-full w-16 h-16 p-0 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95`}
-                  disabled={!vehicleDetected}
-                >
-                  <Camera className="h-7 w-7" />
-                </Button>
-              </div>
+              {/* Botón de captura - Mejorado con animación */}
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.4 }}
+                className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-30"
+              >
+                <motion.div whileTap={{ scale: 0.95 }} whileHover={{ scale: 1.05 }}>
+                  <Button
+                    onClick={takePhoto}
+                    className={`bg-gradient-to-r ${
+                      vehicleDetected ? "from-green-500 to-emerald-600" : "from-red-500 to-red-600"
+                    } text-white rounded-full w-16 h-16 p-0 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed`}
+                    disabled={!vehicleDetected}
+                  >
+                    <Camera className="h-7 w-7" />
+                  </Button>
+                </motion.div>
+
+                {/* Anillo pulsante alrededor del botón cuando está listo */}
+                {vehicleDetected && (
+                  <motion.div
+                    className="absolute inset-0 rounded-full border-2 border-green-400"
+                    animate={{ scale: [1, 1.15, 1], opacity: [1, 0.5, 1] }}
+                    transition={{ repeat: Number.POSITIVE_INFINITY, duration: 2 }}
+                  />
+                )}
+              </motion.div>
             </div>
           </div>
         </div>
@@ -1129,7 +1452,7 @@ export default function Captura() {
               <div
                 className={`inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br ${SIDE_COLORS[SIDES[currentSide] as keyof typeof SIDE_COLORS]} mb-3 shadow-md transform transition-transform duration-300 hover:scale-105 hover:rotate-3`}
               >
-                <span className="text-2xl text-white font-bold">{SIDE_ICONS[SIDES[currentSide]]}</span>
+                <span className="text-2xl text-white font-bold">{SIDE_ICONS[SIDES[currentSide] as keyof typeof SIDE_ICONS]}</span>
               </div>
               <h1 className="text-2xl font-bold text-gray-900">Lado {SIDES[currentSide]}</h1>
               <p className="text-gray-600 max-w-md mx-auto">
@@ -1291,20 +1614,28 @@ export default function Captura() {
                       </div>
                     )}
 
-                    {/* Side indicator */}
+                    {/* Side indicator - Mejorado */}
                     {!isLoading && !showPreview && !cameraError && (
                       <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full z-10">
                         <div className="flex items-center space-x-2">
+                          <div className="w-5 h-5 rounded-full bg-green-500/30 flex items-center justify-center">
+                            <span className="text-white text-xs font-bold">{SIDE_ICONS[SIDES[currentSide] as keyof typeof SIDE_ICONS]}</span>
+                          </div>
                           <span className="text-white text-xs font-medium">{SIDES[currentSide]}</span>
                         </div>
                       </div>
                     )}
 
-                    {/* Orientation indicator */}
+                    {/* Orientation indicator - Mejorado */}
                     {!isLoading && !showPreview && !cameraError && (
                       <div className="absolute bottom-4 right-4 z-10 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full">
                         <div className="flex items-center gap-2">
-                          <RotateCcw className="w-3 h-3 text-white" />
+                          <motion.div
+                            animate={{ rotate: orientation === "landscape" ? 90 : 0 }}
+                            transition={{ duration: 0.5 }}
+                          >
+                            <Smartphone className="w-3 h-3 text-white" />
+                          </motion.div>
                           <span className="text-white text-xs">
                             {orientation === "landscape" ? "Horizontal" : "Vertical"}
                           </span>
@@ -1312,11 +1643,15 @@ export default function Captura() {
                       </div>
                     )}
 
-                    {/* Tap to capture hint */}
+                    {/* Tap to capture hint - Mejorado */}
                     {!isLoading && !showPreview && !cameraError && (
-                      <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs z-10 opacity-80">
+                      <motion.div
+                        animate={{ opacity: [0.7, 1, 0.7] }}
+                        transition={{ repeat: Number.POSITIVE_INFINITY, duration: 2 }}
+                        className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs z-10"
+                      >
                         Toca la pantalla para capturar
-                      </div>
+                      </motion.div>
                     )}
 
                     {/* Photo preview */}
@@ -1328,19 +1663,28 @@ export default function Captura() {
                           exit={{ opacity: 0 }}
                           className="absolute inset-0 bg-gradient-to-br from-green-900/90 to-emerald-900/90 backdrop-blur-sm flex items-center justify-center z-20"
                         >
-                          <div className="text-white flex flex-col items-center">
-                            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-3">
+                          <motion.div
+                            initial={{ scale: 0.8 }}
+                            animate={{ scale: 1 }}
+                            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                            className="text-white flex flex-col items-center"
+                          >
+                            <motion.div
+                              animate={{ scale: [1, 1.2, 1] }}
+                              transition={{ duration: 0.8, repeat: 1 }}
+                              className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-3"
+                            >
                               <CheckCircle className="w-8 h-8 text-green-500" />
-                            </div>
+                            </motion.div>
                             <p className="text-xl font-medium">¡Foto capturada!</p>
                             <p className="text-sm text-green-200 mt-1">Preparando siguiente ángulo...</p>
-                          </div>
+                          </motion.div>
                         </motion.div>
                       )}
                     </AnimatePresence>
                   </div>
 
-                  {/* Floating controls */}
+                  {/* Floating controls - Mejorados */}
                   {!isLoading && !showPreview && !cameraError && (
                     <>
                       {/* Fullscreen button */}
@@ -1348,7 +1692,7 @@ export default function Captura() {
                         variant="secondary"
                         size="sm"
                         onClick={toggleFullscreen}
-                        className="absolute top-4 left-4 z-30 bg-black/50 hover:bg-black/70 text-white border-0"
+                        className="absolute top-4 left-4 z-30 bg-black/50 hover:bg-black/70 text-white border-0 rounded-full"
                       >
                         <Expand className="w-4 h-4 mr-1" />
                         Pantalla completa
@@ -1359,48 +1703,55 @@ export default function Captura() {
                         variant="secondary"
                         size="sm"
                         onClick={() => setShowZoomControls(!showZoomControls)}
-                        className="absolute top-4 right-4 z-30 bg-black/50 hover:bg-black/70 text-white border-0"
+                        className="absolute top-4 right-4 z-30 bg-black/50 hover:bg-black/70 text-white border-0 rounded-full"
                       >
                         <ZoomIn className="w-4 h-4 mr-1" />
                         {Math.round(zoomLevel * 10) / 10}x
                       </Button>
 
                       {/* Zoom controls */}
-                      {showZoomControls && (
-                        <div className="absolute top-16 right-4 z-30 bg-black/50 backdrop-blur-sm rounded-lg p-3 flex flex-col items-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleZoomIn}
-                            disabled={zoomLevel >= 2.6}
-                            className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
+                      <AnimatePresence>
+                        {showZoomControls && (
+                          <motion.div
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="absolute top-16 right-4 z-30 bg-black/50 backdrop-blur-sm rounded-lg p-3 flex flex-col items-center gap-2"
                           >
-                            <ZoomIn className="h-5 w-5" />
-                          </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleZoomIn}
+                              disabled={zoomLevel >= 2.6}
+                              className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
+                            >
+                              <ZoomIn className="h-5 w-5" />
+                            </Button>
 
-                          <div className="h-24 flex items-center">
-                            <Slider
-                              value={[zoomLevel]}
-                              min={1}
-                              max={2.6}
-                              step={0.1}
-                              onValueChange={handleZoomChange}
-                              orientation="vertical"
-                              className="z-30"
-                            />
-                          </div>
+                            <div className="h-24 flex items-center">
+                              <Slider
+                                value={[zoomLevel]}
+                                min={1}
+                                max={2.6}
+                                step={0.1}
+                                onValueChange={handleZoomChange}
+                                orientation="vertical"
+                                className="z-30"
+                              />
+                            </div>
 
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleZoomOut}
-                            disabled={zoomLevel <= 1}
-                            className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
-                          >
-                            <ZoomOut className="h-5 w-5" />
-                          </Button>
-                        </div>
-                      )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={handleZoomOut}
+                              disabled={zoomLevel <= 1}
+                              className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
+                            >
+                              <ZoomOut className="h-5 w-5" />
+                            </Button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </>
                   )}
                 </div>
@@ -1453,68 +1804,90 @@ export default function Captura() {
             </Tabs>
 
             <div className="space-y-6 anim-item anim-slide-up">
-              {/* Camera controls */}
+              {/* Camera controls - Mejorados */}
               <div className="flex justify-center items-center gap-4">
-                <Button
-                  onClick={retakePhoto}
-                  variant="outline"
-                  className="rounded-full w-12 h-12 p-0 border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-300 shadow-sm"
-                  disabled={currentSide === 0 || isLoading || showPreview}
-                >
-                  <RotateCw className="h-5 w-5 text-green-700" />
-                </Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    onClick={retakePhoto}
+                    variant="outline"
+                    className="rounded-full w-12 h-12 p-0 border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-300 shadow-sm"
+                    disabled={currentSide === 0 || isLoading || showPreview}
+                  >
+                    <RotateCw className="h-5 w-5 text-green-700" />
+                  </Button>
+                </motion.div>
 
-                <Button
-                  onClick={takePhoto}
-                  className={`bg-gradient-to-r ${
-                    vehicleDetected || (activeTab === "upload" && uploadedImage)
-                      ? "from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
-                      : "from-red-500 to-red-600 hover:from-red-600 hover:to-red-700"
-                  } text-white rounded-full w-20 h-20 p-0 shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95 relative overflow-hidden group`}
-                  disabled={
-                    isLoading ||
-                    showPreview ||
-                    (activeTab === "camera" && !vehicleDetected) ||
-                    (activeTab === "upload" && !uploadedImage) ||
-                    !!cameraError
-                  }
-                >
-                  <span className="relative z-10">
-                    <Camera className="h-8 w-8" />
-                  </span>
-                  <span
-                    className={`absolute inset-0 bg-gradient-to-r ${
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    onClick={takePhoto}
+                    className={`bg-gradient-to-r ${
                       vehicleDetected || (activeTab === "upload" && uploadedImage)
-                        ? "from-green-600 to-emerald-700"
-                        : "from-red-600 to-red-700"
-                    } opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-0`}
-                  ></span>
-                </Button>
+                        ? "from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
+                        : "from-red-500 to-red-600 hover:from-red-600 hover:to-red-700"
+                    } text-white rounded-full w-20 h-20 p-0 shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed relative overflow-hidden group`}
+                    disabled={
+                      isLoading ||
+                      showPreview ||
+                      (activeTab === "camera" && !vehicleDetected) ||
+                      (activeTab === "upload" && !uploadedImage) ||
+                      !!cameraError
+                    }
+                  >
+                    <span className="relative z-10">
+                      <Camera className="h-8 w-8" />
+                    </span>
+                    <span
+                      className={`absolute inset-0 bg-gradient-to-r ${
+                        vehicleDetected || (activeTab === "upload" && uploadedImage)
+                          ? "from-green-600 to-emerald-700"
+                          : "from-red-600 to-red-700"
+                      } opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-0`}
+                    ></span>
 
-                <Button
-                  onClick={() => setShowGuides(!showGuides)}
-                  variant="outline"
-                  className="rounded-full w-12 h-12 p-0 border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-300 shadow-sm"
-                  disabled={isLoading || showPreview || activeTab === "upload" || !!cameraError}
-                >
-                  <Maximize className="h-5 w-5 text-green-700" />
-                </Button>
+                    {/* Anillo pulsante cuando está listo */}
+                    {(vehicleDetected || (activeTab === "upload" && uploadedImage)) && (
+                      <motion.span
+                        className="absolute inset-0 rounded-full border-2 border-green-400"
+                        animate={{ scale: [1, 1.15, 1], opacity: [1, 0.5, 1] }}
+                        transition={{ repeat: Number.POSITIVE_INFINITY, duration: 2 }}
+                      />
+                    )}
+                  </Button>
+                </motion.div>
+
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    onClick={() => setShowGuides(!showGuides)}
+                    variant="outline"
+                    className="rounded-full w-12 h-12 p-0 border-green-200 hover:bg-green-100 hover:border-green-300 transition-all duration-300 shadow-sm"
+                    disabled={isLoading || showPreview || activeTab === "upload" || !!cameraError}
+                  >
+                    <Maximize className="h-5 w-5 text-green-700" />
+                  </Button>
+                </motion.div>
               </div>
 
               {/* Vehicle detection message */}
-              {activeTab === "camera" && !vehicleDetected && !isLoading && !showPreview && !cameraError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-w-xs mx-auto shadow-sm">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-red-700">
-                      No se detecta ningún bus en el encuadre. Asegúrate de que el bus (Runner, Agrale o NPR) esté
-                      visible para poder tomar la foto.
-                    </p>
-                  </div>
-                </div>
-              )}
+              <AnimatePresence>
+                {activeTab === "camera" && !vehicleDetected && !isLoading && !showPreview && !cameraError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="bg-red-50 border border-red-200 rounded-lg p-3 max-w-xs mx-auto shadow-sm"
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-red-700">
+                        No se detecta ningún bus en el encuadre. Asegúrate de que el bus (Runner, Agrale o NPR) esté
+                        visible para poder tomar la foto.
+                      </p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-              {/* Progress indicator */}
+              {/* Progress indicator - Mejorado */}
               <div className="flex justify-center items-center gap-3 px-4 py-3 bg-white/80 backdrop-blur-sm rounded-full shadow-sm max-w-xs mx-auto border border-green-100">
                 {SIDES.map((side, index) => (
                   <div
@@ -1535,7 +1908,7 @@ export default function Captura() {
                       {index < currentSide ? (
                         <CheckCircle className="w-4 h-4" />
                       ) : (
-                        <span className="text-sm font-bold">{SIDE_ICONS[side]}</span>
+                        <span className="text-sm font-bold">{SIDE_ICONS[side as keyof typeof SIDE_ICONS]}</span>
                       )}
                     </div>
                     <span
