@@ -239,13 +239,19 @@ export default function Captura() {
       setIsLoading(true)
       setCameraError(null)
 
-      // First, stop any existing stream
       if (stream) {
         stream.getTracks().forEach((track) => track.stop())
       }
 
-      // Try with different constraints if the first attempt fails
-      const tryWithConstraints = async (constraints) => {
+      type MediaConstraints = {
+        video: {
+          facingMode?: string;
+          width?: { ideal: number };
+          height?: { ideal: number };
+        };
+      };
+
+      const tryWithConstraints = async (constraints: MediaConstraints) => {
         try {
           console.log("Requesting camera access with constraints:", constraints)
           return await navigator.mediaDevices.getUserMedia(constraints)
@@ -253,9 +259,8 @@ export default function Captura() {
           console.warn("Failed with constraints:", constraints, error)
           throw error
         }
-      }
+      };
 
-      // First try with high resolution
       let newStream
       try {
         const highResConstraints = {
