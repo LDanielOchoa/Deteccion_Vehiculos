@@ -26,14 +26,14 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 
 const SIDES = ["Frontal", "Lateral Izquierdo", "Trasero", "Lateral Derecho"]
 
-const SIDE_ICONS = {
+const SIDE_ICONS: Record<typeof SIDES[number], string> = {
   Frontal: "↑",
   "Lateral Izquierdo": "←",
   Trasero: "↓",
   "Lateral Derecho": "→",
 }
 
-const SIDE_COLORS: Record<string, string> = {
+const SIDE_COLORS: Record<typeof SIDES[number], string> = {
   Frontal: "from-green-400 to-emerald-500",
   "Lateral Izquierdo": "from-emerald-400 to-green-500",
   Trasero: "from-teal-400 to-emerald-500",
@@ -527,7 +527,7 @@ export default function Captura() {
               <div
                 className={`inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br ${SIDE_COLORS[SIDES[currentSide] as keyof typeof SIDE_COLORS]} mb-3 shadow-md transform transition-transform duration-300 hover:scale-105 hover:rotate-3`}
               >
-                <span className="text-2xl text-white font-bold">{SIDE_ICONS[SIDES[currentSide]]}</span>
+                <span className="text-2xl text-white font-bold">{SIDE_ICONS[SIDES[currentSide] as keyof typeof SIDE_ICONS]}</span>
               </div>
               <h1 className="text-2xl font-bold text-gray-900">Lado {SIDES[currentSide]}</h1>
               <p className="text-gray-600 max-w-md mx-auto">Posiciona la cámara correctamente antes de tomar la foto</p>
@@ -741,7 +741,7 @@ export default function Captura() {
                       {index < currentSide ? (
                         <CheckCircle className="w-4 h-4" />
                       ) : (
-                        <span className="text-sm font-bold">{SIDE_ICONS[side]}</span>
+                        <span className="text-sm font-bold">{SIDE_ICONS[side as keyof typeof SIDE_ICONS]}</span>
                       )}
                     </div>
                     <span
