@@ -1,8 +1,20 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { Camera, RefreshCw, ArrowLeft, CheckCircle, RotateCw, Maximize, AlertCircle, Truck, ChevronRight } from 'lucide-react'
+import {
+  Camera,
+  RefreshCw,
+  ArrowLeft,
+  CheckCircle,
+  RotateCw,
+  Maximize,
+  AlertCircle,
+  Truck,
+  ChevronRight,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { motion, AnimatePresence } from "framer-motion"
 import { toast } from "sonner"
@@ -21,7 +33,7 @@ const SIDE_ICONS = {
   "Lateral Derecho": "→",
 }
 
-const SIDE_COLORS = {
+const SIDE_COLORS: Record<string, string> = {
   Frontal: "from-green-400 to-emerald-500",
   "Lateral Izquierdo": "from-emerald-400 to-green-500",
   Trasero: "from-teal-400 to-emerald-500",
@@ -61,7 +73,7 @@ export default function Captura() {
 
   useEffect(() => {
     setIsLoaded(true)
-    
+
     // Add animation classes after component mounts
     setTimeout(() => {
       const animElements = document.querySelectorAll(".anim-item")
@@ -159,7 +171,7 @@ export default function Captura() {
       try {
         // Run detection
         const predictions = await model.detect(videoRef.current)
-        
+
         // Log all detections for debugging
         if (predictions.length > 0) {
           console.log("Detections:", predictions)
@@ -167,70 +179,65 @@ export default function Captura() {
 
         // Prioritize bus detection with lower threshold
         // Bus types in Medellin: Runners, Agrale, NPR are all classified as "bus" in COCO-SSD
-        const busDetection = predictions.find(p => p.class === "bus" && p.score > 0.4)
-        
+        const busDetection = predictions.find((p) => p.class === "bus" && p.score > 0.4)
+
         // If bus is detected, use it
         if (busDetection) {
           setVehicleDetected(true)
-          
+
           // Draw detection results if canvas is available
           if (canvasRef.current) {
             const ctx = canvasRef.current.getContext("2d")
             if (ctx) {
               // Clear canvas
               ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-              
+
               // Draw bounding box with thicker line for buses
               ctx.strokeStyle = "#10b981" // emerald-500
               ctx.lineWidth = 4
-              ctx.strokeRect(
-                busDetection.bbox[0], 
-                busDetection.bbox[1], 
-                busDetection.bbox[2], 
-                busDetection.bbox[3]
-              )
-              
+              ctx.strokeRect(busDetection.bbox[0], busDetection.bbox[1], busDetection.bbox[2], busDetection.bbox[3])
+
               // Draw label with bus highlight
               ctx.fillStyle = "#10b981" // emerald-500
               ctx.font = "bold 18px Arial"
               ctx.fillText(
-                `BUS ${Math.round(busDetection.score * 100)}%`, 
-                busDetection.bbox[0], 
-                busDetection.bbox[1] > 20 ? busDetection.bbox[1] - 5 : busDetection.bbox[1] + 20
+                `BUS ${Math.round(busDetection.score * 100)}%`,
+                busDetection.bbox[0],
+                busDetection.bbox[1] > 20 ? busDetection.bbox[1] - 5 : busDetection.bbox[1] + 20,
               )
             }
           }
         } else {
           // If no bus, check for other vehicles with higher threshold
           const vehicleClasses = ["car", "truck", "bus"]
-          const vehiclePrediction = predictions.find(p => vehicleClasses.includes(p.class) && p.score > 0.5)
-          
+          const vehiclePrediction = predictions.find((p) => vehicleClasses.includes(p.class) && p.score > 0.5)
+
           setVehicleDetected(!!vehiclePrediction)
-          
+
           // Draw detection results if canvas is available
           if (canvasRef.current && vehiclePrediction) {
             const ctx = canvasRef.current.getContext("2d")
             if (ctx) {
               // Clear canvas
               ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-              
+
               // Draw bounding box
               ctx.strokeStyle = "#10b981" // emerald-500
               ctx.lineWidth = 3
               ctx.strokeRect(
-                vehiclePrediction.bbox[0], 
-                vehiclePrediction.bbox[1], 
-                vehiclePrediction.bbox[2], 
-                vehiclePrediction.bbox[3]
+                vehiclePrediction.bbox[0],
+                vehiclePrediction.bbox[1],
+                vehiclePrediction.bbox[2],
+                vehiclePrediction.bbox[3],
               )
-              
+
               // Draw label
               ctx.fillStyle = "#10b981" // emerald-500
               ctx.font = "16px Arial"
               ctx.fillText(
-                `${vehiclePrediction.class} ${Math.round(vehiclePrediction.score * 100)}%`, 
-                vehiclePrediction.bbox[0], 
-                vehiclePrediction.bbox[1] > 20 ? vehiclePrediction.bbox[1] - 5 : vehiclePrediction.bbox[1] + 20
+                `${vehiclePrediction.class} ${Math.round(vehiclePrediction.score * 100)}%`,
+                vehiclePrediction.bbox[0],
+                vehiclePrediction.bbox[1] > 20 ? vehiclePrediction.bbox[1] - 5 : vehiclePrediction.bbox[1] + 20,
               )
             }
           } else if (canvasRef.current) {
@@ -244,11 +251,11 @@ export default function Captura() {
       } catch (error) {
         console.error("Detection error:", error)
       }
-      
+
       // Continue detection loop
       detectionRef.current = requestAnimationFrame(detectVehicle)
     }
-    
+
     detectVehicle()
   }
 
@@ -297,32 +304,32 @@ export default function Captura() {
       })
       return
     }
-    
+
     if (videoRef.current) {
       const canvas = document.createElement("canvas")
       canvas.width = videoRef.current.videoWidth
       canvas.height = videoRef.current.videoHeight
       const ctx = canvas.getContext("2d")
-      
+
       if (ctx) {
         // Draw the video frame
         ctx.drawImage(videoRef.current, 0, 0)
-        
+
         // Get photo data URL
         const photo = canvas.toDataURL("image/jpeg", 0.8)
-        
+
         // Save to state and localStorage
         setPhotos([...photos, photo])
         savePhotoToLocalStorage(photo)
-        
+
         // Show preview
         setShowPreview(true)
-        
+
         // Success toast
         toast.success(`¡Foto ${SIDES[currentSide]} del bus capturada!`, {
           icon: <CheckCircle className="text-green-500" />,
         })
-        
+
         // Move to next side or finish
         setTimeout(() => {
           setShowPreview(false)
@@ -367,15 +374,15 @@ export default function Captura() {
 
   const handleVehicleNumberSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!vehicleNumber.trim()) {
       setVehicleNumberError("El número del vehículo es obligatorio")
       return
     }
-    
+
     // Clear any previous errors
     setVehicleNumberError("")
-    
+
     // Hide form and start camera
     setShowVehicleForm(false)
     toast.success(`Vehículo #${vehicleNumber} registrado`, {
@@ -449,7 +456,7 @@ export default function Captura() {
             animate={{ opacity: 1, y: 0 }}
             className="max-w-md mx-auto anim-item anim-slide-up"
           >
-            
+
             <Card className="border-green-100 shadow-lg overflow-hidden anim-item anim-slide-up">
               <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-100 pb-4">
                 <CardTitle className="flex items-center gap-2 text-green-800">
@@ -471,11 +478,9 @@ export default function Captura() {
                         placeholder="Ingrese el número del vehículo"
                         value={vehicleNumber}
                         onChange={(e) => setVehicleNumber(e.target.value)}
-                        className={`border ${vehicleNumberError ? 'border-red-300' : 'border-green-200'} focus:border-green-400 rounded-lg`}
+                        className={`border ${vehicleNumberError ? "border-red-300" : "border-green-200"} focus:border-green-400 rounded-lg`}
                       />
-                      {vehicleNumberError && (
-                        <p className="text-sm text-red-500">{vehicleNumberError}</p>
-                      )}
+                      {vehicleNumberError && <p className="text-sm text-red-500">{vehicleNumberError}</p>}
                     </div>
                     <p className="text-sm text-gray-500">
                       Este número se guardará junto con las fotos para identificar el vehículo en el historial.
@@ -495,8 +500,13 @@ export default function Captura() {
                   </div>
                 </form>
               </CardContent>
+              <CardFooter className="bg-green-50 border-t border-green-100 text-xs text-gray-500 py-3">
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                  <p>Buses compatibles: Runners, Agrale, NPR del sistema alimentador oriental 6 de Medellín</p>
+                </div>
+              </CardFooter>
             </Card>
-          
           </motion.div>
         ) : (
           <>
@@ -513,6 +523,11 @@ export default function Captura() {
                     <span>Vehículo #{vehicleNumber}</span>
                   </div>
                 </div>
+              </div>
+              <div
+                className={`inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br ${SIDE_COLORS[SIDES[currentSide] as keyof typeof SIDE_COLORS]} mb-3 shadow-md transform transition-transform duration-300 hover:scale-105 hover:rotate-3`}
+              >
+                <span className="text-2xl text-white font-bold">{SIDE_ICONS[SIDES[currentSide]]}</span>
               </div>
               <h1 className="text-2xl font-bold text-gray-900">Lado {SIDES[currentSide]}</h1>
               <p className="text-gray-600 max-w-md mx-auto">Posiciona la cámara correctamente antes de tomar la foto</p>
@@ -549,12 +564,14 @@ export default function Captura() {
               {!isLoading && !isModelLoading && !showPreview && (
                 <div
                   className={`absolute top-4 right-4 flex items-center gap-2 px-3 py-2 rounded-full z-10 transition-all duration-300 ${
-                    vehicleDetected 
-                      ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg" 
+                    vehicleDetected
+                      ? "bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg"
                       : "bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg"
                   }`}
                 >
-                  <div className={`w-3 h-3 rounded-full ${vehicleDetected ? "bg-white animate-pulse" : "bg-white"}`}></div>
+                  <div
+                    className={`w-3 h-3 rounded-full ${vehicleDetected ? "bg-white animate-pulse" : "bg-white"}`}
+                  ></div>
                   <span className="text-xs font-medium">
                     {vehicleDetected ? "Vehículo detectado" : "No se detecta vehículo"}
                   </span>
@@ -673,11 +690,11 @@ export default function Captura() {
                   <span className="relative z-10">
                     <Camera className="h-8 w-8" />
                   </span>
-                  <span className={`absolute inset-0 bg-gradient-to-r ${
-                    vehicleDetected
-                      ? "from-green-600 to-emerald-700"
-                      : "from-red-600 to-red-700"
-                  } opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-0`}></span>
+                  <span
+                    className={`absolute inset-0 bg-gradient-to-r ${
+                      vehicleDetected ? "from-green-600 to-emerald-700" : "from-red-600 to-red-700"
+                    } opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-0`}
+                  ></span>
                 </Button>
 
                 <Button
@@ -696,7 +713,8 @@ export default function Captura() {
                   <div className="flex items-start gap-2">
                     <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
                     <p className="text-sm text-red-700">
-                      No se detecta ningún bus en el encuadre. Asegúrate de que el bus (Runner, Agrale o NPR) esté visible para poder tomar la foto.
+                      No se detecta ningún bus en el encuadre. Asegúrate de que el bus (Runner, Agrale o NPR) esté
+                      visible para poder tomar la foto.
                     </p>
                   </div>
                 </div>
@@ -716,7 +734,7 @@ export default function Captura() {
                         index < currentSide
                           ? "bg-green-100 text-green-600"
                           : index === currentSide
-                            ? `bg-gradient-to-br ${SIDE_COLORS[side]} text-white`
+                            ? `bg-gradient-to-br ${SIDE_COLORS[side as keyof typeof SIDE_COLORS]} text-white`
                             : "bg-gray-100 text-gray-400"
                       }`}
                     >
@@ -741,3 +759,4 @@ export default function Captura() {
     </div>
   )
 }
+
