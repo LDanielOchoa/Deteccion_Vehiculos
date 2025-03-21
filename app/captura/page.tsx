@@ -33,25 +33,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
 
-type SideName = 'Frontal' | 'Lateral Izquierdo' | 'Trasero' | 'Lateral Derecho';
+const SIDES = ["Frontal", "Lateral Izquierdo", "Trasero", "Lateral Derecho"]
 
-const SIDE_COLORS: Record<SideName, string> = {
-  'Frontal': 'from-green-400 to-emerald-500',
-  'Lateral Izquierdo': 'from-emerald-400 to-green-500',
-  'Trasero': 'from-teal-400 to-emerald-500',
-  'Lateral Derecho': 'from-green-400 to-teal-500',
-};
-
-const SIDES: SideName[] = ['Frontal', 'Lateral Izquierdo', 'Trasero', 'Lateral Derecho'];
-
-
-const SIDE_ICONS = {
+const SIDE_ICONS: Record<string, string> = {
   Frontal: "↑",
   "Lateral Izquierdo": "←",
   Trasero: "↓",
   "Lateral Derecho": "→",
+} as const
+
+const SIDE_COLORS: Record<string, string> = {
+  Frontal: "from-green-400 to-emerald-500",
+  "Lateral Izquierdo": "from-emerald-400 to-green-500",
+  Trasero: "from-teal-400 to-emerald-500",
+  "Lateral Derecho": "from-green-400 to-teal-500",
 }
 
+// Define which sides should be in landscape orientation
 const LANDSCAPE_SIDES = ["Lateral Izquierdo", "Lateral Derecho"]
 
 interface PhotoSession {
@@ -75,7 +73,6 @@ export default function Captura() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const videoContainerRef = useRef<HTMLDivElement>(null)
-  const fullscreenContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -134,8 +131,8 @@ export default function Captura() {
               // Load existing photos
               const existingPhotos: string[] = []
               lastSession.photos.forEach((photo) => {
-                if (SIDES.includes(photo.side as SideName)) {
-                  const sideIndex = SIDES.indexOf(photo.side as SideName)
+                const sideIndex = SIDES.indexOf(photo.side)
+                if (sideIndex >= 0) {
                   existingPhotos[sideIndex] = photo.dataUrl
                 }
               })
@@ -158,9 +155,6 @@ export default function Captura() {
       startCamera()
     }
 
-    // Add fullscreen change event listener
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-
     // Add escape key listener to exit fullscreen
     document.addEventListener("keydown", handleKeyDown)
 
@@ -169,7 +163,6 @@ export default function Captura() {
       if (simulationInterval) {
         clearInterval(simulationInterval)
       }
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [showVehicleForm, retakeIndex])
@@ -193,45 +186,29 @@ export default function Captura() {
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape" && isFullscreen) {
-      exitFullscreen()
+      setIsFullscreen(false)
     }
-  }
-
-  const handleFullscreenChange = () => {
-    const newIsFullscreen = !!document.fullscreenElement
-    setIsFullscreen(newIsFullscreen)
-
-    // No resetear el zoom al salir de pantalla completa
-    // Esto mantiene la misma visualización
   }
 
   const toggleFullscreen = () => {
-    if (isFullscreen) {
-      exitFullscreen()
-    } else {
-      // Guardar el nivel de zoom actual antes de entrar a pantalla completa
-      const currentZoom = zoomLevel
-      enterFullscreen()
+    const newFullscreenState = !isFullscreen
 
-      // Asegurar que el mismo nivel de zoom se mantiene en pantalla completa
+    // Si estamos entrando en modo de pantalla completa, reiniciamos la cámara
+    if (newFullscreenState && !isLoading && stream) {
+      console.log("Reiniciando cámara para modo pantalla completa")
+      // Pequeña pausa para permitir que el DOM se actualice
       setTimeout(() => {
-        setZoomLevel(currentZoom)
-      }, 300)
+        if (videoRef.current) {
+          // Asegurar que el video tenga el stream correcto
+          videoRef.current.srcObject = stream
+          videoRef.current.play().catch((err) => {
+            console.error("Error al reproducir video en pantalla completa:", err)
+          })
+        }
+      }, 100)
     }
-  }
 
-  const enterFullscreen = () => {
-    if (fullscreenContainerRef.current) {
-      if (fullscreenContainerRef.current.requestFullscreen) {
-        fullscreenContainerRef.current.requestFullscreen()
-      }
-    }
-  }
-
-  const exitFullscreen = () => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen()
-    }
+    setIsFullscreen(newFullscreenState)
   }
 
   const startCamera = async () => {
@@ -241,19 +218,13 @@ export default function Captura() {
       setIsLoading(true)
       setCameraError(null)
 
+      // First, stop any existing stream
       if (stream) {
         stream.getTracks().forEach((track) => track.stop())
       }
 
-      type MediaConstraints = {
-        video: {
-          facingMode?: string;
-          width?: { ideal: number };
-          height?: { ideal: number };
-        };
-      };
-
-      const tryWithConstraints = async (constraints: MediaConstraints) => {
+      // Try with different constraints if the first attempt fails
+      const tryWithConstraints = async (constraints: MediaStreamConstraints) => {
         try {
           console.log("Requesting camera access with constraints:", constraints)
           return await navigator.mediaDevices.getUserMedia(constraints)
@@ -261,8 +232,9 @@ export default function Captura() {
           console.warn("Failed with constraints:", constraints, error)
           throw error
         }
-      };
+      }
 
+      // First try with high resolution
       let newStream
       try {
         const highResConstraints = {
@@ -516,7 +488,7 @@ export default function Captura() {
 
       // Salir de pantalla completa después de mostrar la vista previa
       if (isFullscreen) {
-        exitFullscreen()
+        setIsFullscreen(false)
       }
 
       if (currentSide < SIDES.length - 1) {
@@ -683,6 +655,28 @@ export default function Captura() {
     startCamera()
   }
 
+  // Añade este useEffect después de los otros efectos
+  useEffect(() => {
+    if (isFullscreen && stream && videoRef.current) {
+      console.log("Aplicando stream al video en pantalla completa")
+
+      // Asegurar que el video tenga el stream correcto
+      videoRef.current.srcObject = stream
+
+      // Forzar la reproducción
+      videoRef.current.play().catch((err) => {
+        console.error("Error al reproducir video en pantalla completa:", err)
+      })
+
+      // Redibujamos la detección si es necesario
+      if (vehicleDetected) {
+        setTimeout(() => {
+          drawSimulatedDetection(true)
+        }, 200)
+      }
+    }
+  }, [isFullscreen, stream])
+
   return (
     <div className="min-h-screen overflow-hidden bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50">
       {/* Animated background elements */}
@@ -697,6 +691,271 @@ export default function Captura() {
           style={{ animationDelay: "2s" }}
         ></div>
       </div>
+
+      {/* Modo de pantalla completa */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-[9999] bg-black">
+          <div className="relative w-full h-full flex items-center justify-center">
+            {/* Video y controles */}
+            <div className="relative w-full h-full">
+              {/* Video - Aseguramos que sea visible */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <motion.div
+                  animate={{ scale: zoomLevel }}
+                  transition={{ type: "spring", stiffness: 300, damping: 30, duration: 0.3 }}
+                  className="w-full h-full"
+                >
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-contain"
+                    style={{ display: "block" }}
+                  />
+                </motion.div>
+              </div>
+
+              {/* Canvas para detección */}
+              <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full pointer-events-none"
+                width={videoRef.current?.videoWidth || 1280}
+                height={videoRef.current?.videoHeight || 720}
+              />
+
+              {/* Loading state */}
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-green-900 to-emerald-900 z-20">
+                  <div className="flex flex-col items-center">
+                    <RefreshCw className="w-12 h-12 text-green-400 animate-spin mb-4" />
+                    <p className="text-green-200 text-sm font-medium">Iniciando cámara...</p>
+                    <div className="mt-4 w-48 h-1.5 bg-green-800/50 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 animate-pulse-slow rounded-full"></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Camera error state */}
+              {cameraError && !isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900/90 to-red-800/90 z-20">
+                  <div className="flex flex-col items-center text-center p-6">
+                    <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
+                    <p className="text-white text-lg font-medium mb-2">Error de cámara</p>
+                    <p className="text-red-200 text-sm mb-6 max-w-xs">{cameraError}</p>
+                    <Button onClick={retryCamera} className="bg-white text-red-600 hover:bg-red-50">
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Reintentar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Camera guides */}
+              {showGuides && !isLoading && !showPreview && !cameraError && (
+                <div className="absolute inset-0 pointer-events-none z-10">
+                  {/* Center frame */}
+                  <div
+                    className={`absolute inset-[15%] border ${
+                      vehicleDetected ? "border-green-400/30" : "border-red-400/30"
+                    } rounded-lg transition-colors duration-300`}
+                  ></div>
+
+                  {/* Corner guides */}
+                  <div
+                    className={`absolute top-[15%] left-[15%] w-6 h-6 border-t border-l ${
+                      vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                    } rounded-tl-lg transition-colors duration-300`}
+                  ></div>
+                  <div
+                    className={`absolute top-[15%] right-[15%] w-6 h-6 border-t border-r ${
+                      vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                    } rounded-tr-lg transition-colors duration-300`}
+                  ></div>
+                  <div
+                    className={`absolute bottom-[15%] left-[15%] w-6 h-6 border-b border-l ${
+                      vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                    } rounded-bl-lg transition-colors duration-300`}
+                  ></div>
+                  <div
+                    className={`absolute bottom-[15%] right-[15%] w-6 h-6 border-b border-r ${
+                      vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                    } rounded-br-lg transition-colors duration-300`}
+                  ></div>
+
+                  {/* Center crosshair */}
+                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                    <div
+                      className={`w-8 h-8 border ${
+                        vehicleDetected ? "border-green-400/40" : "border-red-400/40"
+                      } rounded-full flex items-center justify-center transition-colors duration-300`}
+                    >
+                      <div
+                        className={`w-1.5 h-1.5 ${
+                          vehicleDetected ? "bg-green-400/70" : "bg-red-400/70"
+                        } rounded-full transition-colors duration-300`}
+                      ></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Vehicle detection status indicator */}
+              {!isLoading && !showPreview && !cameraError && (
+                <div
+                  className={`absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full z-10 transition-all duration-300 ${
+                    vehicleDetected
+                      ? "bg-black/40 backdrop-blur-sm text-white"
+                      : "bg-black/40 backdrop-blur-sm text-white"
+                  }`}
+                >
+                  <div
+                    className={`w-2 h-2 rounded-full ${vehicleDetected ? "bg-green-400 animate-pulse" : "bg-red-400"}`}
+                  ></div>
+                  <span className="text-xs font-medium">
+                    {vehicleDetected ? "Vehículo detectado" : "No se detecta vehículo"}
+                  </span>
+                </div>
+              )}
+
+              {/* Side indicator */}
+              {!isLoading && !showPreview && !cameraError && (
+                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full z-10">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-white text-xs font-medium">{SIDES[currentSide]}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Orientation indicator */}
+              {!isLoading && !showPreview && !cameraError && (
+                <div className="absolute bottom-4 right-4 z-10 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full">
+                  <div className="flex items-center gap-2">
+                    <RotateCcw className="w-3 h-3 text-white" />
+                    <span className="text-white text-xs">
+                      {orientation === "landscape" ? "Horizontal" : "Vertical"}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Tap to capture hint */}
+              {!isLoading && !showPreview && !cameraError && (
+                <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs z-10 opacity-80">
+                  Toca la pantalla para capturar
+                </div>
+              )}
+
+              {/* Photo preview */}
+              <AnimatePresence>
+                {showPreview && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 bg-gradient-to-br from-green-900/90 to-emerald-900/90 backdrop-blur-sm flex items-center justify-center z-20"
+                  >
+                    <div className="text-white flex flex-col items-center">
+                      <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-3">
+                        <CheckCircle className="w-8 h-8 text-green-500" />
+                      </div>
+                      <p className="text-xl font-medium">¡Foto capturada!</p>
+                      <p className="text-sm text-green-200 mt-1">Preparando siguiente ángulo...</p>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Controles superiores */}
+              <div className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={toggleFullscreen}
+                    className="bg-black/50 hover:bg-black/70 text-white border-0"
+                  >
+                    <Minimize className="w-4 h-4 mr-1" />
+                    Salir
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowGuides(!showGuides)}
+                    className="bg-black/50 hover:bg-black/70 text-white border-0"
+                  >
+                    {showGuides ? (
+                      <span className="flex items-center">
+                        <X className="w-4 h-4 mr-1" />
+                        Guías
+                      </span>
+                    ) : (
+                      <span className="flex items-center">
+                        <Maximize className="w-4 h-4 mr-1" />
+                        Guías
+                      </span>
+                    )}
+                  </Button>
+                </div>
+
+                <div className="flex items-center">
+                  <Badge variant="outline" className="bg-black/40 text-white border-0">
+                    {SIDES[currentSide]}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Zoom controls */}
+              <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-30 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleZoomOut}
+                  disabled={zoomLevel <= 1}
+                  className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
+                >
+                  <ZoomOut className="h-5 w-5" />
+                </Button>
+
+                <div className="w-40 sm:w-48">
+                  <Slider
+                    value={[zoomLevel]}
+                    min={1}
+                    max={2.6}
+                    step={0.1}
+                    onValueChange={handleZoomChange}
+                    className="z-30"
+                  />
+                </div>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleZoomIn}
+                  disabled={zoomLevel >= 2.6}
+                  className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
+                >
+                  <ZoomIn className="h-5 w-5" />
+                </Button>
+              </div>
+
+              {/* Botón de captura */}
+              <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-30">
+                <Button
+                  onClick={takePhoto}
+                  className={`bg-gradient-to-r ${
+                    vehicleDetected ? "from-green-500 to-emerald-600" : "from-red-500 to-red-600"
+                  } text-white rounded-full w-16 h-16 p-0 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95`}
+                  disabled={!vehicleDetected}
+                >
+                  <Camera className="h-7 w-7" />
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Header - Hide in fullscreen mode */}
       {!isFullscreen && (
@@ -908,320 +1167,181 @@ export default function Captura() {
               </TabsList>
 
               <TabsContent value="camera" className="mt-0">
+                {/* Contenedor de la cámara */}
                 <div
-                  ref={fullscreenContainerRef}
-                  className={`relative ${isFullscreen ? "fixed inset-0 z-[100] bg-black" : "aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-xl border border-green-800/20 anim-item anim-slide-up"}`}
+                  ref={videoContainerRef}
+                  className="relative aspect-[4/3] bg-black rounded-2xl overflow-hidden shadow-xl border border-green-800/20 anim-item anim-slide-up"
+                  onClick={handleScreenTap}
+                  onTouchStart={handleTouchStart}
+                  onTouchMove={handleTouchMove}
+                  onTouchEnd={handleTouchEnd}
                 >
-                  {/* Animación de transición a pantalla completa */}
-                  <AnimatePresence>
-                    {isFullscreen && (
-                      <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.8, opacity: 0 }}
-                        transition={{ duration: 0.3, ease: "easeOut" }}
-                        className="absolute inset-0 z-10"
-                      >
-                        {/* Esta div es solo para la animación */}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  {/* Loading state */}
-                  {isLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-green-900 to-emerald-900 z-20">
-                      <div className="flex flex-col items-center">
-                        <RefreshCw className="w-12 h-12 text-green-400 animate-spin mb-4" />
-                        <p className="text-green-200 text-sm font-medium">Iniciando cámara...</p>
-                        <div className="mt-4 w-48 h-1.5 bg-green-800/50 rounded-full overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 animate-pulse-slow rounded-full"></div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Camera error state */}
-                  {cameraError && !isLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900/90 to-red-800/90 z-20">
-                      <div className="flex flex-col items-center text-center p-6">
-                        <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
-                        <p className="text-white text-lg font-medium mb-2">Error de cámara</p>
-                        <p className="text-red-200 text-sm mb-6 max-w-xs">{cameraError}</p>
-                        <Button onClick={retryCamera} className="bg-white text-red-600 hover:bg-red-50">
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Reintentar
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Camera view with orientation */}
+                  {/* Video */}
                   <div
-                    className={`relative h-full w-full flex items-center justify-center ${isTransitioning ? "opacity-0" : "opacity-100"} transition-opacity duration-300`}
-                    ref={videoContainerRef}
-                    onClick={handleScreenTap}
-                    onTouchStart={handleTouchStart}
-                    onTouchMove={handleTouchMove}
-                    onTouchEnd={handleTouchEnd}
+                    className={`relative w-full h-full ${isTransitioning ? "opacity-0" : "opacity-100"} transition-opacity duration-300`}
                   >
-                    {/* Video container with orientation */}
-                    <div
-                      className={`relative overflow-hidden ${
-                        orientation === "landscape"
-                          ? "w-full max-h-full aspect-video"
-                          : "h-full max-w-full aspect-[3/4]"
-                      } flex items-center justify-center`}
+                    <motion.div
+                      animate={{ scale: zoomLevel }}
+                      transition={{ type: "spring", stiffness: 300, damping: 30, duration: 0.3 }}
+                      className="w-full h-full"
                     >
-                      {/* Video element with zoom */}
-                      <motion.div
-                        animate={{
-                          scale: zoomLevel,
-                        }}
-                        transition={{
-                          type: "spring",
-                          stiffness: 300,
-                          damping: 30,
-                          duration: 0.3,
-                        }}
-                        className="w-full h-full"
-                      >
-                        <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                      </motion.div>
+                      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                    </motion.div>
 
-                      {/* Detection canvas overlay */}
-                      <canvas
-                        ref={canvasRef}
-                        className="absolute top-0 left-0 w-full h-full pointer-events-none z-10"
-                        width={videoRef.current?.videoWidth || 1280}
-                        height={videoRef.current?.videoHeight || 720}
-                      />
+                    {/* Canvas para detección */}
+                    <canvas
+                      ref={canvasRef}
+                      className="absolute top-0 left-0 w-full h-full pointer-events-none z-10"
+                      width={videoRef.current?.videoWidth || 1280}
+                      height={videoRef.current?.videoHeight || 720}
+                    />
 
-                      {/* Camera guides */}
-                      {showGuides && !isLoading && !showPreview && !cameraError && (
-                        <div className="absolute inset-0 pointer-events-none z-10">
-                          {/* Center frame */}
-                          <div
-                            className={`absolute inset-[15%] border ${
-                              vehicleDetected ? "border-green-400/30" : "border-red-400/30"
-                            } rounded-lg transition-colors duration-300`}
-                          ></div>
-
-                          {/* Corner guides */}
-                          <div
-                            className={`absolute top-[15%] left-[15%] w-6 h-6 border-t border-l ${
-                              vehicleDetected ? "border-green-400/50" : "border-red-400/50"
-                            } rounded-tl-lg transition-colors duration-300`}
-                          ></div>
-                          <div
-                            className={`absolute top-[15%] right-[15%] w-6 h-6 border-t border-r ${
-                              vehicleDetected ? "border-green-400/50" : "border-red-400/50"
-                            } rounded-tr-lg transition-colors duration-300`}
-                          ></div>
-                          <div
-                            className={`absolute bottom-[15%] left-[15%] w-6 h-6 border-b border-l ${
-                              vehicleDetected ? "border-green-400/50" : "border-red-400/50"
-                            } rounded-bl-lg transition-colors duration-300`}
-                          ></div>
-                          <div
-                            className={`absolute bottom-[15%] right-[15%] w-6 h-6 border-b border-r ${
-                              vehicleDetected ? "border-green-400/50" : "border-red-400/50"
-                            } rounded-br-lg transition-colors duration-300`}
-                          ></div>
-
-                          {/* Center crosshair */}
-                          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                            <div
-                              className={`w-8 h-8 border ${
-                                vehicleDetected ? "border-green-400/40" : "border-red-400/40"
-                              } rounded-full flex items-center justify-center transition-colors duration-300`}
-                            >
-                              <div
-                                className={`w-1.5 h-1.5 ${
-                                  vehicleDetected ? "bg-green-400/70" : "bg-red-400/70"
-                                } rounded-full transition-colors duration-300`}
-                              ></div>
-                            </div>
+                    {/* Loading state */}
+                    {isLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-green-900 to-emerald-900 z-20">
+                        <div className="flex flex-col items-center">
+                          <RefreshCw className="w-12 h-12 text-green-400 animate-spin mb-4" />
+                          <p className="text-green-200 text-sm font-medium">Iniciando cámara...</p>
+                          <div className="mt-4 w-48 h-1.5 bg-green-800/50 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-green-400 to-emerald-500 animate-pulse-slow rounded-full"></div>
                           </div>
                         </div>
-                      )}
+                      </div>
+                    )}
 
-                      {/* Vehicle detection status indicator */}
-                      {!isLoading && !showPreview && !cameraError && (
+                    {/* Camera error state */}
+                    {cameraError && !isLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900/90 to-red-800/90 z-20">
+                        <div className="flex flex-col items-center text-center p-6">
+                          <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
+                          <p className="text-white text-lg font-medium mb-2">Error de cámara</p>
+                          <p className="text-red-200 text-sm mb-6 max-w-xs">{cameraError}</p>
+                          <Button onClick={retryCamera} className="bg-white text-red-600 hover:bg-red-50">
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Reintentar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Camera guides */}
+                    {showGuides && !isLoading && !showPreview && !cameraError && (
+                      <div className="absolute inset-0 pointer-events-none z-10">
+                        {/* Center frame */}
                         <div
-                          className={`absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full z-10 transition-all duration-300 ${
-                            vehicleDetected
-                              ? "bg-black/40 backdrop-blur-sm text-white"
-                              : "bg-black/40 backdrop-blur-sm text-white"
-                          }`}
-                        >
+                          className={`absolute inset-[15%] border ${
+                            vehicleDetected ? "border-green-400/30" : "border-red-400/30"
+                          } rounded-lg transition-colors duration-300`}
+                        ></div>
+
+                        {/* Corner guides */}
+                        <div
+                          className={`absolute top-[15%] left-[15%] w-6 h-6 border-t border-l ${
+                            vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                          } rounded-tl-lg transition-colors duration-300`}
+                        ></div>
+                        <div
+                          className={`absolute top-[15%] right-[15%] w-6 h-6 border-t border-r ${
+                            vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                          } rounded-tr-lg transition-colors duration-300`}
+                        ></div>
+                        <div
+                          className={`absolute bottom-[15%] left-[15%] w-6 h-6 border-b border-l ${
+                            vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                          } rounded-bl-lg transition-colors duration-300`}
+                        ></div>
+                        <div
+                          className={`absolute bottom-[15%] right-[15%] w-6 h-6 border-b border-r ${
+                            vehicleDetected ? "border-green-400/50" : "border-red-400/50"
+                          } rounded-br-lg transition-colors duration-300`}
+                        ></div>
+
+                        {/* Center crosshair */}
+                        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
                           <div
-                            className={`w-2 h-2 rounded-full ${vehicleDetected ? "bg-green-400 animate-pulse" : "bg-red-400"}`}
-                          ></div>
-                          <span className="text-xs font-medium">
-                            {vehicleDetected ? "Vehículo detectado" : "No se detecta vehículo"}
+                            className={`w-8 h-8 border ${
+                              vehicleDetected ? "border-green-400/40" : "border-red-400/40"
+                            } rounded-full flex items-center justify-center transition-colors duration-300`}
+                          >
+                            <div
+                              className={`w-1.5 h-1.5 ${
+                                vehicleDetected ? "bg-green-400/70" : "bg-red-400/70"
+                              } rounded-full transition-colors duration-300`}
+                            ></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Vehicle detection status indicator */}
+                    {!isLoading && !showPreview && !cameraError && (
+                      <div
+                        className={`absolute top-4 right-4 flex items-center gap-2 px-3 py-1.5 rounded-full z-10 transition-all duration-300 ${
+                          vehicleDetected
+                            ? "bg-black/40 backdrop-blur-sm text-white"
+                            : "bg-black/40 backdrop-blur-sm text-white"
+                        }`}
+                      >
+                        <div
+                          className={`w-2 h-2 rounded-full ${vehicleDetected ? "bg-green-400 animate-pulse" : "bg-red-400"}`}
+                        ></div>
+                        <span className="text-xs font-medium">
+                          {vehicleDetected ? "Vehículo detectado" : "No se detecta vehículo"}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Side indicator */}
+                    {!isLoading && !showPreview && !cameraError && (
+                      <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full z-10">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-white text-xs font-medium">{SIDES[currentSide]}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Orientation indicator */}
+                    {!isLoading && !showPreview && !cameraError && (
+                      <div className="absolute bottom-4 right-4 z-10 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full">
+                        <div className="flex items-center gap-2">
+                          <RotateCcw className="w-3 h-3 text-white" />
+                          <span className="text-white text-xs">
+                            {orientation === "landscape" ? "Horizontal" : "Vertical"}
                           </span>
                         </div>
-                      )}
+                      </div>
+                    )}
 
-                      {/* Side indicator */}
-                      {!isLoading && !showPreview && !cameraError && (
-                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full z-10">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-white text-xs font-medium">{SIDES[currentSide]}</span>
-                          </div>
-                        </div>
-                      )}
+                    {/* Tap to capture hint */}
+                    {!isLoading && !showPreview && !cameraError && (
+                      <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs z-10 opacity-80">
+                        Toca la pantalla para capturar
+                      </div>
+                    )}
 
-                      {/* Orientation indicator */}
-                      {!isLoading && !showPreview && !cameraError && (
-                        <div className="absolute bottom-4 right-4 z-10 bg-black/60 backdrop-blur-sm px-3 py-1 rounded-full">
-                          <div className="flex items-center gap-2">
-                            <RotateCcw className="w-3 h-3 text-white" />
-                            <span className="text-white text-xs">
-                              {orientation === "landscape" ? "Horizontal" : "Vertical"}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Tap to capture hint */}
-                      {!isLoading && !showPreview && !cameraError && (
-                        <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/30 backdrop-blur-sm px-3 py-1.5 rounded-full text-white text-xs z-10 opacity-80">
-                          Toca la pantalla para capturar
-                        </div>
-                      )}
-
-                      {/* Photo preview */}
-                      <AnimatePresence>
-                        {showPreview && (
-                          <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="absolute inset-0 bg-gradient-to-br from-green-900/90 to-emerald-900/90 backdrop-blur-sm flex items-center justify-center z-20"
-                          >
-                            <div className="text-white flex flex-col items-center">
-                              <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-3">
-                                <CheckCircle className="w-8 h-8 text-green-500" />
-                              </div>
-                              <p className="text-xl font-medium">¡Foto capturada!</p>
-                              <p className="text-sm text-green-200 mt-1">Preparando siguiente ángulo...</p>
+                    {/* Photo preview */}
+                    <AnimatePresence>
+                      {showPreview && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="absolute inset-0 bg-gradient-to-br from-green-900/90 to-emerald-900/90 backdrop-blur-sm flex items-center justify-center z-20"
+                        >
+                          <div className="text-white flex flex-col items-center">
+                            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-3">
+                              <CheckCircle className="w-8 h-8 text-green-500" />
                             </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
-                    {/* Fullscreen controls - Mejorados para móviles */}
-                    {isFullscreen && !isLoading && !showPreview && !cameraError && (
-                      <motion.div
-                        initial={{ y: -20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.2 }}
-                        className="absolute top-4 left-0 right-0 z-30 flex items-center justify-between px-4"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={exitFullscreen}
-                            className="bg-black/50 hover:bg-black/70 text-white border-0"
-                          >
-                            <Minimize className="w-4 h-4 mr-1" />
-                            Salir
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setShowGuides(!showGuides)}
-                            className="bg-black/50 hover:bg-black/70 text-white border-0"
-                          >
-                            {showGuides ? (
-                              <span className="flex items-center">
-                                <X className="w-4 h-4 mr-1" />
-                                Guías
-                              </span>
-                            ) : (
-                              <span className="flex items-center">
-                                <Maximize className="w-4 h-4 mr-1" />
-                                Guías
-                              </span>
-                            )}
-                          </Button>
-                        </div>
-
-                        <div className="flex items-center">
-                          <Badge variant="outline" className="bg-black/40 text-white border-0">
-                            {SIDES[currentSide]}
-                          </Badge>
-                        </div>
-                      </motion.div>
-                    )}
-
-                    {/* Zoom controls in fullscreen - Mejorados para móviles */}
-                    {isFullscreen && !isLoading && !showPreview && !cameraError && (
-                      <motion.div
-                        initial={{ y: 20, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.3 }}
-                        className="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-30 bg-black/40 backdrop-blur-sm rounded-full px-4 py-2 flex items-center gap-4"
-                      >
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleZoomOut}
-                          disabled={zoomLevel <= 1}
-                          className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
-                        >
-                          <ZoomOut className="h-5 w-5" />
-                        </Button>
-
-                        <div className="w-40 sm:w-48">
-                          <Slider
-                            value={[zoomLevel]}
-                            min={1}
-                            max={2.6}
-                            step={0.1}
-                            onValueChange={handleZoomChange}
-                            className="z-30"
-                          />
-                        </div>
-
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleZoomIn}
-                          disabled={zoomLevel >= 2.6}
-                          className="h-8 w-8 p-0 text-white hover:bg-black/30 rounded-full"
-                        >
-                          <ZoomIn className="h-5 w-5" />
-                        </Button>
-                      </motion.div>
-                    )}
-
-                    {/* Botón de captura en pantalla completa para móviles */}
-                    {isFullscreen && !isLoading && !showPreview && !cameraError && (
-                      <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        transition={{ delay: 0.4 }}
-                        className="absolute bottom-8 left-1/2 transform -translate-x-1/2 z-30"
-                      >
-                        <Button
-                          onClick={takePhoto}
-                          className={`bg-gradient-to-r ${
-                            vehicleDetected ? "from-green-500 to-emerald-600" : "from-red-500 to-red-600"
-                          } text-white rounded-full w-16 h-16 p-0 shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95`}
-                          disabled={!vehicleDetected}
-                        >
-                          <Camera className="h-7 w-7" />
-                        </Button>
-                      </motion.div>
-                    )}
+                            <p className="text-xl font-medium">¡Foto capturada!</p>
+                            <p className="text-sm text-green-200 mt-1">Preparando siguiente ángulo...</p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
 
-                  {/* Floating controls (only shown when not in fullscreen) */}
-                  {!isFullscreen && !isLoading && !showPreview && !cameraError && (
+                  {/* Floating controls */}
+                  {!isLoading && !showPreview && !cameraError && (
                     <>
                       {/* Fullscreen button */}
                       <Button
