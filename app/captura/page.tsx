@@ -33,7 +33,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Slider } from "@/components/ui/slider"
 import { Badge } from "@/components/ui/badge"
 
-const SIDES = ["Frontal", "Lateral Izquierdo", "Trasero", "Lateral Derecho"]
+type SideName = 'Frontal' | 'Lateral Izquierdo' | 'Trasero' | 'Lateral Derecho';
+
+const SIDE_COLORS: Record<SideName, string> = {
+  'Frontal': 'from-green-400 to-emerald-500',
+  'Lateral Izquierdo': 'from-emerald-400 to-green-500',
+  'Trasero': 'from-teal-400 to-emerald-500',
+  'Lateral Derecho': 'from-green-400 to-teal-500',
+};
+
+const SIDES: SideName[] = ['Frontal', 'Lateral Izquierdo', 'Trasero', 'Lateral Derecho'];
+
 
 const SIDE_ICONS = {
   Frontal: "↑",
@@ -42,14 +52,6 @@ const SIDE_ICONS = {
   "Lateral Derecho": "→",
 }
 
-const SIDE_COLORS: Record<string, string> = {
-  Frontal: "from-green-400 to-emerald-500",
-  "Lateral Izquierdo": "from-emerald-400 to-green-500",
-  Trasero: "from-teal-400 to-emerald-500",
-  "Lateral Derecho": "from-green-400 to-teal-500",
-}
-
-// Define which sides should be in landscape orientation
 const LANDSCAPE_SIDES = ["Lateral Izquierdo", "Lateral Derecho"]
 
 interface PhotoSession {
@@ -132,8 +134,8 @@ export default function Captura() {
               // Load existing photos
               const existingPhotos: string[] = []
               lastSession.photos.forEach((photo) => {
-                const sideIndex = SIDES.indexOf(photo.side)
-                if (sideIndex >= 0) {
+                if (SIDES.includes(photo.side as SideName)) {
+                  const sideIndex = SIDES.indexOf(photo.side as SideName)
                   existingPhotos[sideIndex] = photo.dataUrl
                 }
               })
