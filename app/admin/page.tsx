@@ -161,7 +161,7 @@ export default function PhotosAdmin() {
                         <CardContent>
                           <div className="aspect-w-4 aspect-h-3 bg-gray-100 rounded-md overflow-hidden">
                             <img
-                              src={photo.photoData || "/placeholder.svg"}
+                              // src={photo.photoData || "/placeholder.svg"}
                               alt={`Lado ${photo.side} del vehículo ${photo.vehicleNumber}`}
                               className="object-cover w-full h-full"
                             />
