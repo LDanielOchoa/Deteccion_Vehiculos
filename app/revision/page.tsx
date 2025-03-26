@@ -26,17 +26,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { toast } from "sonner"
 import { motion } from "framer-motion"
 import { Slider } from "@/components/ui/slider"
+import { getSession, completeSession } from "@/app/actions/photo-storage"
 
 interface PhotoData {
   side: string
-  dataUrl: string
+  photoUrl: string // Cambiado de dataUrl a photoUrl
   timestamp: string
 }
 
-interface PhotoSession {
+interface ClientPhotoSession {
   id: string
   date: string
-  vehicleNumber?: string
+  vehicleNumber: string
   photos: PhotoData[]
 }
 
@@ -58,7 +59,7 @@ export default function Revision() {
   const sessionParam = searchParams.get("session")
 
   const [isLoading, setIsLoading] = useState(true)
-  const [session, setSession] = useState<PhotoSession | null>(null)
+  const [session, setSession] = useState<ClientPhotoSession | null>(null)
   const [photos, setPhotos] = useState<Record<string, string>>({})
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null)
   const [selectedSide, setSelectedSide] = useState<string | null>(null)
@@ -123,53 +124,131 @@ export default function Revision() {
     }
   }
 
-  const loadSession = () => {
+  const loadSession = async () => {
     setIsLoading(true)
     try {
-      const storedSessions = localStorage.getItem("photoSessions")
-      if (storedSessions) {
-        const sessions: PhotoSession[] = JSON.parse(storedSessions)
+      // Si se proporciona un ID de sesión específico, intentamos cargar esa sesión
+      if (sessionParam) {
+        let blobSession
 
-        // If a specific session ID is provided, load that session
-        if (sessionParam) {
-          const foundSession = sessions.find((s) => s.id === sessionParam)
-          if (foundSession) {
-            setSession(foundSession)
-
-            // Create a map of side -> dataUrl
-            const photoMap: Record<string, string> = {}
-            foundSession.photos.forEach((photo) => {
-              photoMap[photo.side] = photo.dataUrl
-            })
-            setPhotos(photoMap)
-          } else {
-            toast.error("Sesión no encontrada")
-            router.push("/historial")
-          }
-        } else {
-          // Otherwise, load the most recent session
-          const latestSession = sessions[sessions.length - 1]
-          if (latestSession) {
-            setSession(latestSession)
-
-            // Create a map of side -> dataUrl
-            const photoMap: Record<string, string> = {}
-            latestSession.photos.forEach((photo) => {
-              photoMap[photo.side] = photo.dataUrl
-            })
-            setPhotos(photoMap)
-          } else {
-            toast.error("No hay sesiones disponibles")
-            router.push("/captura")
+        try {
+          // Intentar cargar desde Vercel Blob
+          blobSession = await getSession(sessionParam)
+        } catch (error) {
+          console.error("Error fetching from Vercel Blob, trying localStorage:", error)
+          // Intentar cargar desde localStorage como fallback
+          const storedSessions = localStorage.getItem("photoSessions")
+          if (storedSessions) {
+            const sessions = JSON.parse(storedSessions)
+            blobSession = sessions.find((s: any) => s.id === sessionParam)
           }
         }
+
+        if (blobSession) {
+          // Convertir la sesión al formato que espera el componente
+          let clientSession: ClientPhotoSession
+
+          // Verificar si es una sesión de Blob o de localStorage
+          if (blobSession.photos && blobSession.photos[0] && typeof blobSession.photos[0].photoUrl === "string") {
+            // Formato Blob
+            clientSession = {
+              id: blobSession.id,
+              date: new Date(blobSession.timestamp).toISOString(),
+              vehicleNumber: blobSession.vehicleNumber,
+              photos: blobSession.photos.map((photo: any) => ({
+                side: photo.side,
+                photoUrl: photo.photoUrl,
+                timestamp: new Date(photo.timestamp).toISOString(),
+              })),
+            }
+          } else if (
+            blobSession.photos &&
+            blobSession.photos[0] &&
+            typeof blobSession.photos[0].photoData === "string"
+          ) {
+            // Formato antiguo (Redis)
+            clientSession = {
+              id: blobSession.id,
+              date: new Date(blobSession.timestamp).toISOString(),
+              vehicleNumber: blobSession.vehicleNumber,
+              photos: blobSession.photos.map((photo: any) => ({
+                side: photo.side,
+                photoUrl: photo.photoData,
+                timestamp: new Date(photo.timestamp).toISOString(),
+              })),
+            }
+          } else {
+            // Formato localStorage
+            clientSession = {
+              id: blobSession.id,
+              date: blobSession.date || new Date().toISOString(),
+              vehicleNumber: blobSession.vehicleNumber,
+              photos: blobSession.photos.map((photo: any) => ({
+                side: photo.side,
+                photoUrl: photo.photoUrl || photo.dataUrl,
+                timestamp: photo.timestamp || new Date().toISOString(),
+              })),
+            }
+          }
+
+          setSession(clientSession)
+
+          // Crear un mapa de lado -> photoUrl
+          const photoMap: Record<string, string> = {}
+          clientSession.photos.forEach((photo) => {
+            photoMap[photo.side] = photo.photoUrl
+          })
+          setPhotos(photoMap)
+        } else {
+          toast.error("Sesión no encontrada")
+          router.push("/historial")
+        }
       } else {
-        toast.error("No hay sesiones disponibles")
-        router.push("/captura")
+        toast.error("No se especificó una sesión")
+        router.push("/historial")
       }
     } catch (error) {
       console.error("Error loading session:", error)
       toast.error("Error al cargar la sesión")
+
+      // Intentar cargar desde localStorage como último recurso
+      try {
+        const storedSessions = localStorage.getItem("photoSessions")
+        if (storedSessions && sessionParam) {
+          const sessions = JSON.parse(storedSessions)
+          const localSession = sessions.find((s: any) => s.id === sessionParam)
+
+          if (localSession) {
+            const clientSession: ClientPhotoSession = {
+              id: localSession.id,
+              date: localSession.date,
+              vehicleNumber: localSession.vehicleNumber,
+              photos: localSession.photos.map((photo: any) => ({
+                side: photo.side,
+                photoUrl: photo.photoUrl || photo.dataUrl,
+                timestamp: photo.timestamp,
+              })),
+            }
+
+            setSession(clientSession)
+
+            const photoMap: Record<string, string> = {}
+            clientSession.photos.forEach((photo) => {
+              photoMap[photo.side] = photo.photoUrl
+            })
+            setPhotos(photoMap)
+
+            toast.success("Cargado desde almacenamiento local (modo sin conexión)")
+          } else {
+            router.push("/historial")
+          }
+        } else {
+          router.push("/historial")
+        }
+      } catch (localError) {
+        console.error("Error loading from localStorage:", localError)
+        router.push("/historial")
+      }
     } finally {
       setIsLoading(false)
     }
@@ -182,17 +261,27 @@ export default function Revision() {
     }
   }
 
-  const handleSavePhotos = () => {
-    toast.success("Fotos guardadas correctamente", {
-      description: "Las fotos han sido almacenadas en el historial",
-    })
-    router.push("/historial")
+  const handleSavePhotos = async () => {
+    if (session) {
+      try {
+        // Marcar la sesión como completada en Vercel Blob
+        await completeSession(session.id)
+
+        toast.success("Fotos guardadas correctamente", {
+          description: "Las fotos han sido almacenadas en el historial",
+        })
+        router.push("/historial")
+      } catch (error) {
+        console.error("Error saving photos:", error)
+        toast.error("Error al guardar las fotos")
+      }
+    }
   }
 
-  const downloadPhoto = (dataUrl: string, side: string) => {
+  const downloadPhoto = (photoUrl: string, side: string) => {
     try {
       const link = document.createElement("a")
-      link.href = dataUrl
+      link.href = photoUrl
       link.download = `${side}_${new Date().toISOString().split("T")[0]}.jpg`
       document.body.appendChild(link)
       link.click()

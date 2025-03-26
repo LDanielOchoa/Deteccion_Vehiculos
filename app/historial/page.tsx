@@ -10,17 +10,20 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Badge } from "@/components/ui/badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { motion, AnimatePresence } from "framer-motion"
+import { getAllSessions, deleteSession } from "@/app/actions/photo-storage"
 
+// Adaptamos la interfaz PhotoData para trabajar con nuestros datos
 interface PhotoData {
   side: string
-  dataUrl: string
+  photoUrl: string // Cambiado de dataUrl a photoUrl
   timestamp: string
 }
 
-interface PhotoSession {
+// Adaptamos la interfaz PhotoSession para trabajar con nuestros datos
+interface ClientPhotoSession {
   id: string
   date: string
-  vehicleNumber?: string // Make it optional for backward compatibility
+  vehicleNumber: string
   photos: PhotoData[]
 }
 
@@ -40,7 +43,7 @@ const SIDE_COLORS = {
 
 export default function Historial() {
   const router = useRouter()
-  const [sessions, setSessions] = useState<PhotoSession[]>([])
+  const [sessions, setSessions] = useState<ClientPhotoSession[]>([])
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState("all")
@@ -65,30 +68,131 @@ export default function Historial() {
     }, 100)
   }, [])
 
-  const loadSessions = () => {
+  const loadSessions = async () => {
     setIsLoading(true)
     try {
-      const storedSessions = localStorage.getItem("photoSessions")
-      if (storedSessions) {
-        const parsedSessions: PhotoSession[] = JSON.parse(storedSessions)
-        // Sort sessions by date (newest first)
-        parsedSessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        setSessions(parsedSessions)
+      // Intentar obtener sesiones desde Vercel Blob
+      let blobSessions
+      try {
+        blobSessions = await getAllSessions()
+      } catch (error) {
+        console.error("Error fetching from Vercel Blob, trying localStorage:", error)
+        // Intentar cargar desde localStorage como fallback
+        const storedSessions = localStorage.getItem("photoSessions")
+        if (storedSessions) {
+          blobSessions = JSON.parse(storedSessions)
+        } else {
+          blobSessions = []
+        }
+      }
+
+      if (blobSessions && blobSessions.length > 0) {
+        // Convertir las sesiones al formato que espera el componente
+        const clientSessions: ClientPhotoSession[] = blobSessions.map((session: any) => {
+          // Verificar si es una sesión de Blob o de localStorage
+          if (session.photos && Array.isArray(session.photos)) {
+            if (session.photos[0] && typeof session.photos[0].photoUrl === "string") {
+              // Formato Blob
+              return {
+                id: session.id,
+                date: new Date(session.timestamp).toISOString(),
+                vehicleNumber: session.vehicleNumber,
+                photos: session.photos.map((photo: any) => ({
+                  side: photo.side,
+                  photoUrl: photo.photoUrl,
+                  timestamp: new Date(photo.timestamp).toISOString(),
+                })),
+              }
+            } else if (session.photos[0] && typeof session.photos[0].photoData === "string") {
+              // Formato antiguo (Redis)
+              return {
+                id: session.id,
+                date: new Date(session.timestamp).toISOString(),
+                vehicleNumber: session.vehicleNumber,
+                photos: session.photos.map((photo: any) => ({
+                  side: photo.side,
+                  photoUrl: photo.photoData,
+                  timestamp: new Date(photo.timestamp).toISOString(),
+                })),
+              }
+            } else {
+              // Formato localStorage
+              return {
+                id: session.id,
+                date: session.date || new Date(session.timestamp).toISOString(),
+                vehicleNumber: session.vehicleNumber,
+                photos: session.photos.map((photo: any) => ({
+                  side: photo.side,
+                  photoUrl: photo.photoUrl || photo.dataUrl,
+                  timestamp: photo.timestamp || new Date().toISOString(),
+                })),
+              }
+            }
+          }
+
+          // Formato desconocido, intentar adaptarlo
+          return {
+            id: session.id || `session_${Date.now()}`,
+            date: session.date || new Date(session.timestamp || Date.now()).toISOString(),
+            vehicleNumber: session.vehicleNumber || "",
+            photos: Array.isArray(session.photos)
+              ? session.photos.map((photo: any) => ({
+                  side: photo.side || "",
+                  photoUrl: photo.photoUrl || photo.dataUrl || photo.photoData || "",
+                  timestamp: photo.timestamp || new Date().toISOString(),
+                }))
+              : [],
+          }
+        })
+
+        // Ordenar por fecha (más reciente primero)
+        clientSessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        setSessions(clientSessions)
       }
     } catch (error) {
-      console.error("Error loading sessions from localStorage:", error)
+      console.error("Error loading sessions:", error)
       toast.error("Error al cargar el historial de fotos")
+
+      // Intentar cargar desde localStorage como último recurso
+      try {
+        const storedSessions = localStorage.getItem("photoSessions")
+        if (storedSessions) {
+          const localSessions = JSON.parse(storedSessions)
+          const clientSessions = localSessions.map((session: any) => ({
+            id: session.id,
+            date: session.date,
+            vehicleNumber: session.vehicleNumber,
+            photos: session.photos.map((photo: any) => ({
+              side: photo.side,
+              photoUrl: photo.photoUrl || photo.dataUrl,
+              timestamp: photo.timestamp,
+            })),
+          }))
+          setSessions(clientSessions)
+          toast.success("Cargado desde almacenamiento local (modo sin conexión)")
+        }
+      } catch (localError) {
+        console.error("Error loading from localStorage:", localError)
+      }
     } finally {
       setIsLoading(false)
     }
   }
 
-  const deleteSession = (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
     try {
-      const updatedSessions = sessions.filter((session) => session.id !== sessionId)
-      localStorage.setItem("photoSessions", JSON.stringify(updatedSessions))
-      setSessions(updatedSessions)
-      toast.success("Sesión eliminada correctamente")
+      // Eliminar sesión de Vercel Blob
+      const success = await deleteSession(sessionId)
+
+      if (success) {
+        // Actualizar el estado local
+        const updatedSessions = sessions.filter((session) => session.id !== sessionId)
+        setSessions(updatedSessions)
+        toast.success("Sesión eliminada correctamente")
+      } else {
+        toast.error("No se pudo eliminar la sesión")
+      }
+
       setConfirmDelete(null)
     } catch (error) {
       console.error("Error deleting session:", error)
@@ -99,7 +203,7 @@ export default function Historial() {
   const downloadPhoto = (photo: PhotoData) => {
     try {
       const link = document.createElement("a")
-      link.href = photo.dataUrl
+      link.href = photo.photoUrl
       link.download = `${photo.side}_${new Date(photo.timestamp).toISOString().split("T")[0]}.jpg`
       document.body.appendChild(link)
       link.click()
@@ -111,7 +215,7 @@ export default function Historial() {
     }
   }
 
-  const downloadAllPhotos = (session: PhotoSession) => {
+  const downloadAllPhotos = (session: ClientPhotoSession) => {
     try {
       session.photos.forEach((photo) => {
         setTimeout(() => {
@@ -236,6 +340,56 @@ export default function Historial() {
       </div>
 
       <div className="container mx-auto px-4 py-6">
+        {selectedPhoto && (
+          <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
+            <DialogContent className="sm:max-w-2xl border-green-100">
+              <DialogHeader>
+                <DialogTitle className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <div
+                      className={`${SIDE_COLORS[selectedPhoto.side as keyof typeof SIDE_COLORS]} w-6 h-6 rounded-full flex items-center justify-center mr-2 shadow-sm`}
+                    >
+                      <span className="text-white text-xs">
+                        {SIDE_ICONS[selectedPhoto.side as keyof typeof SIDE_ICONS]}
+                      </span>
+                    </div>
+                    <span className="text-green-800">Foto {selectedPhoto.side}</span>
+                  </div>
+                  <span className="text-sm font-normal text-green-600">
+                    {new Date(selectedPhoto.timestamp).toLocaleString()}
+                  </span>
+                </DialogTitle>
+              </DialogHeader>
+              <div className="rounded-lg overflow-hidden border border-green-200 bg-green-50">
+                <img
+                  src={selectedPhoto.photoUrl || "/placeholder.svg"}
+                  alt={`Foto ${selectedPhoto.side}`}
+                  className="w-full h-auto"
+                />
+              </div>
+              <div className="flex justify-end space-x-2 mt-4">
+                <DialogClose asChild>
+                  <Button
+                    variant="outline"
+                    className="border-green-200 text-green-700 hover:bg-green-50"
+                  >
+                    Cerrar
+                  </Button>
+                </DialogClose>
+                <Button
+                  onClick={() => downloadPhoto(selectedPhoto)}
+                  className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white group relative overflow-hidden"
+                >
+                  <span className="relative z-10 flex items-center">
+                    <Download className="w-4 h-4 mr-2" />
+                    Descargar
+                  </span>
+                  <span className="absolute inset-0 bg-gradient-to-r from-green-600 to-emerald-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-0"></span>
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
         {isLoading ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="relative">
@@ -365,7 +519,7 @@ export default function Historial() {
                                 onClick={() => setSelectedPhoto(photo)}
                               >
                                 <img
-                                  src={photo.dataUrl || "/placeholder.svg"}
+                                  src={photo.photoUrl || "/placeholder.svg"}
                                   alt={`Foto ${photo.side}`}
                                   className="w-full h-full object-cover"
                                 />
@@ -415,7 +569,7 @@ export default function Historial() {
                               </DialogHeader>
                               <div className="rounded-lg overflow-hidden border border-green-200 bg-green-50">
                                 <img
-                                  src={photo.dataUrl || "/placeholder.svg"}
+                                  src={photo.photoUrl || "/placeholder.svg"}
                                   alt={`Foto ${photo.side}`}
                                   className="w-full h-auto"
                                 />
@@ -451,7 +605,7 @@ export default function Historial() {
                           <Badge variant="secondary" className="mr-2 bg-green-100 text-green-800">
                             {session.photos.length} fotos
                           </Badge>
-                          <span className="text-sm text-green-600">ID: {session.id.split("_")[1]}</span>
+                          <span className="text-sm text-green-600">ID: {session.id.split(":")[1] || session.id}</span>
                         </div>
                         <Button
                           variant="ghost"
@@ -494,7 +648,7 @@ export default function Historial() {
                 Cancelar
               </Button>
             </DialogClose>
-            <Button onClick={() => confirmDelete && deleteSession(confirmDelete)} variant="destructive">
+            <Button onClick={() => confirmDelete && handleDeleteSession(confirmDelete)} variant="destructive">
               Eliminar permanentemente
             </Button>
           </div>
